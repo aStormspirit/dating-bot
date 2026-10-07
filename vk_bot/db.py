@@ -55,10 +55,33 @@ def _execute(query: str, params: dict[str, Any] | tuple | None = None) -> psycop
         return _connection().execute(query, params)
 
 
+def _sql_statements(script: str) -> list[str]:
+    """Делит SQL-файл на запросы. Точки с запятой внутри $$ не режут запрос."""
+    statements: list[str] = []
+    chunk: list[str] = []
+    in_dollar = False
+    for line in script.splitlines():
+        if not in_dollar and line.strip().startswith("--"):
+            continue
+        chunk.append(line)
+        if line.count("$$") % 2:
+            in_dollar = not in_dollar
+        if not in_dollar and line.strip().endswith(";"):
+            statement = "\n".join(chunk).strip()
+            if statement:
+                statements.append(statement)
+            chunk = []
+    tail = "\n".join(chunk).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
 def ensure_schema() -> None:
-    """Создаёт таблицы сессий и профилей, если их ещё нет."""
+    """Создаёт таблицы сессий и профилей и добавляет новые колонки профиля."""
     for path in sorted(_INIT_DIR.glob("*.sql")):
-        _execute(path.read_text(encoding="utf-8"))
+        for statement in _sql_statements(path.read_text(encoding="utf-8")):
+            _execute(statement)
 
 
 def fetch_sessions() -> list[tuple[int, dict[str, Any]]]:
@@ -178,10 +201,27 @@ def save_bot_user(
     )
 
 
+def record_search(user_id: int) -> None:
+    """Увеличивает число запусков поиска собеседника."""
+    _execute(
+        """
+        INSERT INTO bot_users (user_id, search_count)
+        VALUES (%s, 1)
+        ON CONFLICT (user_id) DO UPDATE SET
+            search_count = bot_users.search_count + 1,
+            updated_at = NOW()
+        """,
+        (user_id,),
+    )
+
+
 def fetch_bot_users() -> list[dict[str, Any]]:
-    """Возвращает сохранённые id, пол и возраст."""
+    """Возвращает сохранённые id, пол, возраст, ссылку, премиум и число поисков."""
     rows = _execute(
-        "SELECT user_id, gender, age, partner_gender FROM bot_users"
+        """
+        SELECT user_id, gender, age, partner_gender, vk_url, is_premium, search_count
+        FROM bot_users
+        """
     ).fetchall()
     return [
         {
@@ -189,6 +229,9 @@ def fetch_bot_users() -> list[dict[str, Any]]:
             "gender": row["gender"],
             "age": row["age"],
             "partner_gender": row["partner_gender"],
+            "vk_url": row["vk_url"],
+            "is_premium": bool(row["is_premium"]),
+            "search_count": int(row["search_count"] or 0),
         }
         for row in rows
     ]

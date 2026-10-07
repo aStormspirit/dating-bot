@@ -12,6 +12,7 @@ from vk_bot.db import (
     ensure_schema,
     fetch_bot_users,
     fetch_sessions,
+    record_search,
     save_bot_user,
     save_session,
     touch_bot_user,
@@ -109,6 +110,7 @@ def begin_search(user_id: int) -> int:
     state.blocked = False
     state.history.clear()
     _persist_user(user_id)
+    record_search(user_id)
     return state.generation
 
 
