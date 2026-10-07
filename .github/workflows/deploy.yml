@@ -1,0 +1,50 @@
+name: Deploy
+
+on:
+  push:
+    branches: [master]
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check deploy secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          test -n "$DEPLOY_HOST" || { echo "Добавьте секрет DEPLOY_HOST"; exit 1; }
+          test -n "$DEPLOY_USER" || { echo "Добавьте секрет DEPLOY_USER"; exit 1; }
+          test -n "$DEPLOY_SSH_KEY" || { echo "Добавьте секрет DEPLOY_SSH_KEY"; exit 1; }
+
+      - name: Update the server
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script_stop: true
+          command_timeout: 30m
+          envs: DEPLOY_PATH,ENV_FILE
+          script: |
+            set -eu
+            APP_DIR="${DEPLOY_PATH:-/opt/dating-bot}"
+            if [ ! -d "$APP_DIR/.git" ]; then
+              mkdir -p "$(dirname "$APP_DIR")"
+              git clone https://github.com/aStormspirit/dating-bot.git "$APP_DIR"
+            fi
+            cd "$APP_DIR"
+            if [ ! -f .env ] && [ -n "${ENV_FILE:-}" ]; then
+              printf '%s\n' "$ENV_FILE" > .env
+              chmod 600 .env
+            fi
+            sh deploy/update.sh

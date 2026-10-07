@@ -102,7 +102,7 @@ services:
     container_name: vk-premium-web
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:8000"
+      - "${PREMIUM_PUBLISH:-127.0.0.1:8080}:8000"
     environment:
       DATABASE_URL: postgresql://supabase_admin:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}
     depends_on:
