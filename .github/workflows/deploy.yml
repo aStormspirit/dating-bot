@@ -105,7 +105,6 @@ jobs:
               git clone https://github.com/aStormspirit/dating-bot.git "$APP_DIR"
             fi
             cd "$APP_DIR"
-            docker logs vk-bot --tail 400 2>&1 | grep -E "картинк|загруз|VKAPI|premium.jpg|welcome.jpg|Error" || true
             if [ ! -f .env ] && [ -n "${ENV_FILE:-}" ]; then
               printf '%s\n' "$ENV_FILE" > .env
               chmod 600 .env
