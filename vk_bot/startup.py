@@ -86,9 +86,14 @@ def check_photo_access(token: str) -> None:
 
     err = response["error"]
     code = err.get("error_code")
-    # 100 значит, что метод разрешён, но тестовый peer_id не является диалогом.
-    if code == 100:
-        print("OK: право photos есть, загрузка картинок доступна.")
+    # 15 и 27 — у ключа нет права photos. Остальные коды значат, что метод уже доступен,
+    # а тестовый peer_id=1 просто не является диалогом с ботом.
+    if code not in {15, 27}:
+        print(
+            "OK: право photos есть. "
+            f"Тестовый вызов вернул VK Error [{code}] subcode={err.get('error_subcode')}: "
+            f"{err.get('error_msg')}."
+        )
         return
 
     print(
