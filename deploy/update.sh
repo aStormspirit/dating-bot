@@ -85,7 +85,7 @@ docker logout >/dev/null 2>&1 || true
 docker compose --profile proxy up -d --no-build --remove-orphans --force-recreate bot
 docker restart vk-bot-caddy
 sleep 12
-docker logs vk-bot --tail 80 2>&1 | grep -E "OK:|Нет права|Нет доступа|Токен невалиден|Бот запущен|Ошибка запуска|VK Error" || true
+docker logs vk-bot --tail 80 2>&1 | grep -E "Колонки bot_users|OK:|Нет права|Нет доступа|Токен невалиден|Бот запущен|Ошибка запуска|VK Error|Traceback" || true
 sleep 8
 docker logs vk-bot-caddy --tail 20 || true
 docker image prune -af

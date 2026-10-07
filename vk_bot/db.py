@@ -82,6 +82,16 @@ def ensure_schema() -> None:
     for path in sorted(_INIT_DIR.glob("*.sql")):
         for statement in _sql_statements(path.read_text(encoding="utf-8")):
             _execute(statement)
+    columns = _execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'bot_users'
+        ORDER BY ordinal_position
+        """
+    ).fetchall()
+    names = ", ".join(row["column_name"] for row in columns)
+    print(f"Колонки bot_users: {names}")
 
 
 def fetch_sessions() -> list[tuple[int, dict[str, Any]]]:
