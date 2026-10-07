@@ -41,8 +41,20 @@ set_env PREMIUM_URL "https://${PAY_HOST}"
 set_env STUDIO_PUBLIC_URL "https://${STUDIO_HOST}"
 set_env PREMIUM_PUBLISH "127.0.0.1:8080"
 
-public_ip=$(curl -4 -fsS --max-time 15 https://api.ipify.org || true)
-echo "PUBLIC_IP=${public_ip}"
+lookup_ip() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -4 -fsS --max-time 15 https://api.ipify.org && return
+    curl -4 -fsS --max-time 15 https://ifconfig.me/ip && return
+  fi
+  if command -v wget >/dev/null 2>&1; then
+    wget -4 -qO- --timeout=15 https://api.ipify.org && return
+  fi
+  return 1
+}
+
+public_ip=$(lookup_ip || true)
+public_ip=$(printf '%s' "$public_ip" | tr -d '[:space:]')
+echo "IP_PARTS=$(printf '%s' "$public_ip" | tr '.' ' ')"
 
 if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
   printf '%s' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
