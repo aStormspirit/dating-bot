@@ -63,4 +63,7 @@ fi
 docker compose --profile proxy pull
 docker logout >/dev/null 2>&1 || true
 docker compose --profile proxy up -d --no-build --remove-orphans
+docker restart vk-bot-caddy
+sleep 20
+docker logs vk-bot-caddy --tail 60 || true
 docker image prune -af
