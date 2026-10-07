@@ -37,7 +37,7 @@ set_env() {
 
 set_env PAY_HOST "$PAY_HOST"
 set_env STUDIO_HOST "$STUDIO_HOST"
-set_env PREMIUM_URL "https://${PAY_HOST}"
+set_env PREMIUM_URL "https://vk.cc/d2HjY8"
 set_env STUDIO_PUBLIC_URL "https://${STUDIO_HOST}"
 set_env PREMIUM_PUBLISH "127.0.0.1:8080"
 

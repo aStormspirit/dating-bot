@@ -17,5 +17,5 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 CHATS_PATH = ROOT_DIR / "data" / "chats.json"
 DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip()
 
-PREMIUM_URL = (os.getenv("PREMIUM_URL") or "http://127.0.0.1:8080").strip().rstrip("/")
+PREMIUM_URL = (os.getenv("PREMIUM_URL") or "https://vk.cc/d2HjY8").strip()
 PREMIUM_IMAGE = Path(__file__).resolve().parent / "assets" / "premium.png"

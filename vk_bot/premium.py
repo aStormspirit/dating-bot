@@ -4,7 +4,12 @@ from vkbottle import PhotoMessageUploader
 from vkbottle.bot import Message
 
 from vk_bot.config import PREMIUM_IMAGE, PREMIUM_URL
-from vk_bot.ui import build_premium_keyboard, new_random_id, premium_message
+from vk_bot.ui import (
+    build_premium_keyboard,
+    gender_premium_message,
+    new_random_id,
+    premium_message,
+)
 
 _attachment: str | None = None
 
@@ -41,11 +46,20 @@ async def _premium_photo(message: Message) -> str | None:
 
 
 async def send_premium(message: Message) -> None:
-    """Отправляет акцию: фото, текст и ссылку на отдельный сайт оплаты."""
-    offer_url = f"{PREMIUM_URL}/?vk_id={message.from_id}"
+    """Отправляет текст премиума, карточку и кнопку со ссылкой на оплату."""
+    name = await _first_name(message)
     await message.answer(
-        premium_message(await _first_name(message), offer_url),
+        premium_message(name),
         attachment=await _premium_photo(message),
-        keyboard=build_premium_keyboard(offer_url),
+        keyboard=build_premium_keyboard(PREMIUM_URL),
+        random_id=new_random_id(),
+    )
+
+
+async def send_gender_premium(message: Message) -> None:
+    """Объясняет, что фильтр по полу открывается после оплаты."""
+    await message.answer(
+        gender_premium_message(await _first_name(message)),
+        keyboard=build_premium_keyboard(PREMIUM_URL),
         random_id=new_random_id(),
     )

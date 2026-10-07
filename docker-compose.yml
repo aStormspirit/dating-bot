@@ -44,7 +44,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://supabase_admin:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}
-      PREMIUM_URL: ${PREMIUM_URL:-http://127.0.0.1:8080}
+      PREMIUM_URL: ${PREMIUM_URL:-https://vk.cc/d2HjY8}
     volumes:
       - ./data:/app/data:ro
     depends_on:

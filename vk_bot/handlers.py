@@ -22,7 +22,7 @@ from vk_bot.chat import (
     set_partner_gender,
     stop_chat,
 )
-from vk_bot.premium import send_premium
+from vk_bot.premium import send_gender_premium, send_premium
 from vk_bot.ui import (
     CHAT_BTN_NEXT,
     CHAT_BTN_REPORT,
@@ -35,7 +35,6 @@ from vk_bot.ui import (
     MENU_BTN_SEARCH,
     WELCOME_TEXT,
     build_chat_keyboard,
-    build_gender_keyboard,
     build_main_keyboard,
     menu_message,
     menu_text,
@@ -136,11 +135,7 @@ async def handle_partner_gender(message: Message, user_id: int, text: str, busy:
     if busy:
         return False
     if text == MENU_BTN_PARTNER_GENDER:
-        await message.answer(
-            "Кого ищем? Собеседник будет вести переписку в этой роли.",
-            keyboard=build_gender_keyboard(),
-            random_id=new_random_id(),
-        )
+        await send_gender_premium(message)
         return True
 
     choice = {
