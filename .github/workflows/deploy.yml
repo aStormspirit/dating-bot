@@ -9,24 +9,85 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  publish:
     runs-on: ubuntu-latest
+    outputs:
+      bot_image: ${{ steps.images.outputs.bot_image }}
+      premium_image: ${{ steps.images.outputs.premium_image }}
     steps:
-      - name: Check deploy secrets
+      - name: Check secrets
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
-          test -n "$DEPLOY_HOST" || { echo "Добавьте секрет DEPLOY_HOST"; exit 1; }
-          test -n "$DEPLOY_USER" || { echo "Добавьте секрет DEPLOY_USER"; exit 1; }
-          test -n "$DEPLOY_SSH_KEY" || { echo "Добавьте секрет DEPLOY_SSH_KEY"; exit 1; }
+          missing=0
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DOCKERHUB_USERNAME DOCKERHUB_TOKEN; do
+            eval "value=\${$name}"
+            if [ -z "$value" ]; then
+              echo "Добавьте секрет $name"
+              missing=1
+            fi
+          done
+          test "$missing" -eq 0
 
-      - name: Update the server
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Image names
+        id: images
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          user=$(printf '%s' "$DOCKERHUB_USERNAME" | tr '[:upper:]' '[:lower:]')
+          echo "bot_image=${user}/dating-bot:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "premium_image=${user}/dating-premium:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Push bot image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.images.outputs.bot_image }}
+          cache-from: type=gha,scope=bot
+          cache-to: type=gha,scope=bot,mode=max
+
+      - name: Push premium image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./premium_site
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.images.outputs.premium_image }}
+          cache-from: type=gha,scope=premium
+          cache-to: type=gha,scope=premium,mode=max
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update containers from Docker Hub
         uses: appleboy/ssh-action@v1.2.2
         env:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           ENV_FILE: ${{ secrets.ENV_FILE }}
+          GIT_SHA: ${{ github.sha }}
+          BOT_IMAGE: ${{ needs.publish.outputs.bot_image }}
+          PREMIUM_IMAGE: ${{ needs.publish.outputs.premium_image }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -34,7 +95,7 @@ jobs:
           port: ${{ secrets.DEPLOY_PORT || 22 }}
           script_stop: true
           command_timeout: 30m
-          envs: DEPLOY_PATH,ENV_FILE
+          envs: DEPLOY_PATH,ENV_FILE,GIT_SHA,BOT_IMAGE,PREMIUM_IMAGE,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN
           script: |
             set -eu
             APP_DIR="${DEPLOY_PATH:-/opt/dating-bot}"

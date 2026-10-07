@@ -1,5 +1,6 @@
 # Бот ВК, база Supabase Postgres и локальная панель Studio.
-# Запуск: docker compose up --build
+# Локально: docker compose up --build
+# На сервере CI подставляет BOT_IMAGE и PREMIUM_IMAGE из Docker Hub, сборки нет.
 # Studio: http://127.0.0.1:54323
 
 services:
@@ -36,6 +37,7 @@ services:
       start_period: 20s
 
   bot:
+    image: ${BOT_IMAGE:-dating-bot:local}
     build: .
     container_name: vk-bot
     restart: unless-stopped
@@ -98,6 +100,7 @@ services:
       - ./supabase/studio/functions:/app/edge-functions:ro
 
   premium:
+    image: ${PREMIUM_IMAGE:-dating-premium:local}
     build: ./premium_site
     container_name: vk-premium-web
     restart: unless-stopped
