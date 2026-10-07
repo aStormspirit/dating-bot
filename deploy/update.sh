@@ -17,9 +17,29 @@ fi
 git fetch origin "$GIT_SHA"
 git checkout --detach --force "$GIT_SHA"
 
-if [ ! -f .env ]; then
+if [ ! -f .env ] && [ -z "${ENV_FILE:-}" ]; then
   echo "На сервере нет .env. Создайте его из .env.example и заполните токены." >&2
   exit 1
+fi
+
+if [ -n "${ENV_FILE:-}" ]; then
+  secret_file=$(mktemp)
+  printf '%s\n' "$ENV_FILE" | tr -d '\r' > "$secret_file"
+  token_line=$(grep -E '^VK_TOKEN=' "$secret_file" | tail -n 1 || true)
+  rm -f "$secret_file"
+  if [ -z "$token_line" ]; then
+    echo "В секрете ENV_FILE нет строки VK_TOKEN." >&2
+    exit 1
+  fi
+  if [ ! -f .env ]; then
+    : > .env
+  fi
+  tmp=$(mktemp)
+  grep -v '^VK_TOKEN=' .env > "$tmp" || true
+  printf '%s\n' "$token_line" >> "$tmp"
+  mv "$tmp" .env
+  chmod 600 .env
+  echo "VK_TOKEN на сервере обновлён из ENV_FILE."
 fi
 
 PAY_HOST="${PAY_HOST:-pay.chatwithyou.site}"
@@ -62,8 +82,10 @@ fi
 
 docker compose --profile proxy pull
 docker logout >/dev/null 2>&1 || true
-docker compose --profile proxy up -d --no-build --remove-orphans
+docker compose --profile proxy up -d --no-build --remove-orphans --force-recreate bot
 docker restart vk-bot-caddy
-sleep 20
-docker logs vk-bot-caddy --tail 60 || true
+sleep 12
+docker logs vk-bot --tail 80 2>&1 | grep -E "OK:|Нет права|Нет доступа|Токен невалиден|Бот запущен|Ошибка запуска|VK Error" || true
+sleep 8
+docker logs vk-bot-caddy --tail 20 || true
 docker image prune -af

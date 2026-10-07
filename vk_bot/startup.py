@@ -69,4 +69,30 @@ def preflight_check(token: str) -> int:
             f"  5. Для подробностей: python diagnose.py"
         )
 
+    check_photo_access(token)
     return group_id
+
+
+def check_photo_access(token: str) -> None:
+    """Пишет в лог, может ли ключ загружать фото. Без этого права картинка не уйдёт."""
+    response = requests.get(
+        "https://api.vk.com/method/photos.getMessagesUploadServer",
+        params={"access_token": token, "peer_id": 1, "v": API_VERSION},
+        timeout=15,
+    ).json()
+    if "error" not in response:
+        print("OK: photos.getMessagesUploadServer доступен, картинки можно отправлять.")
+        return
+
+    err = response["error"]
+    code = err.get("error_code")
+    # 100 значит, что метод разрешён, но тестовый peer_id не является диалогом.
+    if code == 100:
+        print("OK: право photos есть, загрузка картинок доступна.")
+        return
+
+    print(
+        "Нет права загружать фото. "
+        f"VK Error [{code}] subcode={err.get('error_subcode')}: {err.get('error_msg')}. "
+        "Нужен новый ключ сообщества с правом «Фотографии»."
+    )
