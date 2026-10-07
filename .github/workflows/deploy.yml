@@ -11,9 +11,6 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    outputs:
-      bot_image: ${{ steps.images.outputs.bot_image }}
-      premium_image: ${{ steps.images.outputs.premium_image }}
     steps:
       - name: Check secrets
         env:
@@ -84,8 +81,6 @@ jobs:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           ENV_FILE: ${{ secrets.ENV_FILE }}
           GIT_SHA: ${{ github.sha }}
-          BOT_IMAGE: ${{ needs.publish.outputs.bot_image }}
-          PREMIUM_IMAGE: ${{ needs.publish.outputs.premium_image }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         with:
@@ -93,12 +88,18 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT || 22 }}
-          script_stop: true
           command_timeout: 30m
-          envs: DEPLOY_PATH,ENV_FILE,GIT_SHA,BOT_IMAGE,PREMIUM_IMAGE,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN
+          envs: DEPLOY_PATH,ENV_FILE,GIT_SHA,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN
           script: |
             set -eu
-            APP_DIR="${DEPLOY_PATH:-/opt/dating-bot}"
+            if [ -n "${DEPLOY_PATH:-}" ]; then
+              APP_DIR="$DEPLOY_PATH"
+            else
+              APP_DIR="${HOME}/dating-bot"
+            fi
+            hub_user=$(printf '%s' "$DOCKERHUB_USERNAME" | tr '[:upper:]' '[:lower:]')
+            export BOT_IMAGE="${hub_user}/dating-bot:${GIT_SHA}"
+            export PREMIUM_IMAGE="${hub_user}/dating-premium:${GIT_SHA}"
             if [ ! -d "$APP_DIR/.git" ]; then
               mkdir -p "$(dirname "$APP_DIR")"
               git clone https://github.com/aStormspirit/dating-bot.git "$APP_DIR"
