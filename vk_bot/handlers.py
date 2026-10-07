@@ -22,6 +22,8 @@ from vk_bot.chat import (
     set_partner_gender,
     stop_chat,
 )
+from vk_bot.config import WELCOME_IMAGE
+from vk_bot.photos import upload_photo
 from vk_bot.premium import send_gender_premium, send_premium
 from vk_bot.ui import (
     CHAT_BTN_NEXT,
@@ -68,8 +70,9 @@ async def handle_start(message: Message, user_id: int) -> bool:
     stop_chat(user_id)
     await message.answer(
         f"{WELCOME_TEXT}\n\n{menu_text()}",
+        attachment=await upload_photo(message, WELCOME_IMAGE),
         keyboard=build_main_keyboard(),
-        random_id=random.randint(1, 2_147_483_647),
+        random_id=new_random_id(),
     )
     return True
 
