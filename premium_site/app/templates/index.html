@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>72 часа премиум-статуса</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="offer">
+    <p class="kicker">Временная акция</p>
+    <h1>72 часа премиум-статуса</h1>
+    <p class="price">
+      <span class="old">199</span>
+      <span class="now">{{ price }} ₽</span>
+    </p>
+    <ul class="perks">
+      <li><span>1</span>Поиск собеседника по полу и возрасту</li>
+      <li><span>2</span>Обмен фото, видео, стикерами и аудио</li>
+      <li><span>3</span>Выбор комнаты общения по тематике</li>
+    </ul>
+    {% if vk_id %}
+    <p class="account">Аккаунт VK {{ vk_id }}</p>
+    {% endif %}
+    <form method="post" action="/checkout">
+      <input type="hidden" name="vk_id" value="{{ vk_id or '' }}">
+      <button type="submit">Оплатить {{ price }} ₽</button>
+    </form>
+    <p class="note">{{ hours }} часа премиума после оплаты</p>
+  </main>
+</body>
+</html>

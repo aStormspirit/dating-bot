@@ -1,0 +1,113 @@
+# Бот ВК, база Supabase Postgres и локальная панель Studio.
+# Запуск: docker compose up --build
+# Studio: http://127.0.0.1:54323
+
+services:
+  db:
+    image: supabase/postgres:17.6.1.136
+    container_name: vk-bot-db
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      POSTGRES_PORT: 5432
+      PGPORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      PGDATABASE: ${POSTGRES_DB:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
+      JWT_EXP: 3600
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - log_min_messages=fatal
+    volumes:
+      - supabase_data:/var/lib/postgresql/data
+      - ./supabase/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "psql -U supabase_admin -h localhost -d $$POSTGRES_DB -c 'SELECT 1' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  bot:
+    build: .
+    container_name: vk-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://supabase_admin:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}
+      PREMIUM_URL: ${PREMIUM_URL:-http://127.0.0.1:8080}
+    volumes:
+      - ./data:/app/data:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  meta:
+    image: supabase/postgres-meta:v0.99.0
+    container_name: vk-bot-meta
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: ${POSTGRES_DB:-postgres}
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      CRYPTO_KEY: ${PG_META_CRYPTO_KEY:-local-studio-crypto-key-32-characters}
+
+  studio:
+    image: supabase/studio:2026.09.07-sha-7996410
+    container_name: vk-bot-studio
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:54323:3000"
+    depends_on:
+      meta:
+        condition: service_started
+    environment:
+      HOSTNAME: "0.0.0.0"
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_USER_READ_WRITE: supabase_admin
+      PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY:-local-studio-crypto-key-32-characters}
+      DEFAULT_ORGANIZATION_NAME: ${STUDIO_DEFAULT_ORGANIZATION:-VK Bot}
+      DEFAULT_PROJECT_NAME: ${STUDIO_DEFAULT_PROJECT:-vk-bot}
+      SUPABASE_URL: http://127.0.0.1:54323
+      SUPABASE_PUBLIC_URL: http://127.0.0.1:54323
+      SUPABASE_ANON_KEY: ${ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MTc2OTIwMCwKICAgICJleHAiOiAxNzk5NTM1NjAwCn0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJzZXJ2aWNlX3JvbGUiLAogICAgImlzcyI6ICJzdXBhYmFzZS1kZW1vIiwKICAgICJpYXQiOiAxNjQxNzY5MjAwLAogICAgImV4cCI6IDE3OTk1MzU2MDAKfQ.DaYlNEoUrrEn2Ig7tqibS-PHK5vgusbcbo7X36XVt4Q}
+      AUTH_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
+      ENABLED_FEATURES_LOGS_ALL: "false"
+      SNIPPETS_MANAGEMENT_FOLDER: /app/snippets
+      EDGE_FUNCTIONS_MANAGEMENT_FOLDER: /app/edge-functions
+    volumes:
+      - ./supabase/studio/snippets:/app/snippets
+      - ./supabase/studio/functions:/app/edge-functions:ro
+
+  premium:
+    build: ./premium_site
+    container_name: vk-premium-web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8000"
+    environment:
+      DATABASE_URL: postgresql://supabase_admin:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  supabase_data:

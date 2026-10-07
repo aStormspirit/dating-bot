@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Счёт на {{ amount }} ₽</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="offer">
+    <p class="kicker">Счёт создан</p>
+    <h1>{{ hours }} часа премиума</h1>
+    <p class="price"><span class="now">{{ amount }} ₽</span></p>
+    <p class="account">Статус: ожидает оплату</p>
+    {% if vk_user_id %}
+    <p class="account">Аккаунт VK {{ vk_user_id }}</p>
+    {% endif %}
+    <p class="note">Номер счёта {{ order_id }}</p>
+    <a class="back" href="/">Вернуться к акции</a>
+  </main>
+</body>
+</html>
