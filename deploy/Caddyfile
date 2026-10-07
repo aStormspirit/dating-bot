@@ -1,0 +1,7 @@
+{$PAY_HOST:pay.chatwithyou.site} {
+	reverse_proxy premium:8000
+}
+
+{$STUDIO_HOST:studio.chatwithyou.site} {
+	reverse_proxy studio:3000
+}

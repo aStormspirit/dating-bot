@@ -63,16 +63,8 @@ def health() -> dict[str, str]:
 
 
 @app.get("/", response_class=HTMLResponse)
-def offer_page(request: Request, vk_id: str = "") -> HTMLResponse:
-    return templates.TemplateResponse(
-        request,
-        "index.html",
-        {
-            "vk_id": _vk_user_id(vk_id),
-            "price": OFFER_PRICE_RUB,
-            "hours": OFFER_HOURS,
-        },
-    )
+def offer_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request, "index.html", {})
 
 
 @app.post("/checkout")

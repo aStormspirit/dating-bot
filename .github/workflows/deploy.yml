@@ -109,4 +109,6 @@ jobs:
               printf '%s\n' "$ENV_FILE" > .env
               chmod 600 .env
             fi
+            git fetch origin "$GIT_SHA"
+            git checkout --detach --force "$GIT_SHA"
             sh deploy/update.sh

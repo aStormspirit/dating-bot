@@ -1,6 +1,6 @@
 #!/bin/sh
 # Подтягивает коммит, скачивает образы из Docker Hub и перезапускает контейнеры.
-# .env не трогает и ничего на сервере не собирает.
+# В .env обновляет только адреса оплаты и Studio.
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -22,11 +22,33 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
+PAY_HOST="${PAY_HOST:-pay.chatwithyou.site}"
+STUDIO_HOST="${STUDIO_HOST:-studio.chatwithyou.site}"
+
+set_env() {
+  key=$1
+  value=$2
+  tmp=$(mktemp)
+  grep -v "^${key}=" .env > "$tmp" || true
+  printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  mv "$tmp" .env
+  chmod 600 .env
+}
+
+set_env PAY_HOST "$PAY_HOST"
+set_env STUDIO_HOST "$STUDIO_HOST"
+set_env PREMIUM_URL "https://${PAY_HOST}"
+set_env STUDIO_PUBLIC_URL "https://${STUDIO_HOST}"
+set_env PREMIUM_PUBLISH "127.0.0.1:8080"
+
+public_ip=$(curl -4 -fsS --max-time 15 https://api.ipify.org || true)
+echo "PUBLIC_IP=${public_ip}"
+
 if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
   printf '%s' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
 fi
 
-docker compose pull
+docker compose --profile proxy pull
 docker logout >/dev/null 2>&1 || true
-docker compose up -d --no-build --remove-orphans
+docker compose --profile proxy up -d --no-build --remove-orphans
 docker image prune -af

@@ -87,8 +87,8 @@ services:
       PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY:-local-studio-crypto-key-32-characters}
       DEFAULT_ORGANIZATION_NAME: ${STUDIO_DEFAULT_ORGANIZATION:-VK Bot}
       DEFAULT_PROJECT_NAME: ${STUDIO_DEFAULT_PROJECT:-vk-bot}
-      SUPABASE_URL: http://127.0.0.1:54323
-      SUPABASE_PUBLIC_URL: http://127.0.0.1:54323
+      SUPABASE_URL: ${STUDIO_PUBLIC_URL:-http://127.0.0.1:54323}
+      SUPABASE_PUBLIC_URL: ${STUDIO_PUBLIC_URL:-http://127.0.0.1:54323}
       SUPABASE_ANON_KEY: ${ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MTc2OTIwMCwKICAgICJleHAiOiAxNzk5NTM1NjAwCn0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE}
       SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJzZXJ2aWNlX3JvbGUiLAogICAgImlzcyI6ICJzdXBhYmFzZS1kZW1vIiwKICAgICJpYXQiOiAxNjQxNzY5MjAwLAogICAgImV4cCI6IDE3OTk1MzU2MDAKfQ.DaYlNEoUrrEn2Ig7tqibS-PHK5vgusbcbo7X36XVt4Q}
       AUTH_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
@@ -112,5 +112,27 @@ services:
       db:
         condition: service_healthy
 
+  caddy:
+    image: caddy:2.10
+    container_name: vk-bot-caddy
+    profiles: ["proxy"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      PAY_HOST: ${PAY_HOST:-pay.chatwithyou.site}
+      STUDIO_HOST: ${STUDIO_HOST:-studio.chatwithyou.site}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - premium
+      - studio
+
 volumes:
   supabase_data:
+  caddy_data:
+  caddy_config:
