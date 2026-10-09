@@ -14,13 +14,7 @@ def menu_text() -> str:
     return f"{_MENU_HEAD}{online} человек\n{_MENU_TAIL}"
 WELCOME_TEXT = "Привет! 👋 Это чат для анонимных знакомств, флирта и лёгкого общения."
 
-MENU_BTN_SEARCH = "🔍 Поиск"
-MENU_BTN_PARTNER_GENDER = "Выбрать пол партнера"
-MENU_BTN_PREMIUM = "Премиум доступ"
-
-GENDER_BTN_FEMALE = "👩 Девушка"
-GENDER_BTN_MALE = "👨 Парень"
-GENDER_BTN_ANY = "🎲 Любой"
+MENU_BTN_SEARCH = "🔍 Найти собеседника"
 
 CHAT_BTN_NEXT = "➡️ Следующий собеседник"
 CHAT_BTN_REPORT = "🛑⚠️ Пожаловаться на спам"
@@ -42,27 +36,10 @@ def menu_message(text: str = "") -> str:
 
 
 def build_main_keyboard() -> str:
-    """Клавиатура у поля ввода: [Поиск] [Пол партнера] / [Премиум]."""
-    keyboard = (
-        Keyboard(one_time=False, inline=False)
-        .add(Text(MENU_BTN_SEARCH), color=KeyboardButtonColor.POSITIVE)
-        .add(Text(MENU_BTN_PARTNER_GENDER), color=KeyboardButtonColor.PRIMARY)
-        .row()
-        .add(Text(MENU_BTN_PREMIUM), color=KeyboardButtonColor.SECONDARY)
-    )
-    return keyboard.get_json()
-
-
-def build_gender_keyboard() -> str:
-    """Клавиатура выбора роли собеседника перед поиском."""
-    keyboard = (
-        Keyboard(one_time=False, inline=False)
-        .add(Text(GENDER_BTN_FEMALE), color=KeyboardButtonColor.PRIMARY)
-        .add(Text(GENDER_BTN_MALE), color=KeyboardButtonColor.PRIMARY)
-        .row()
-        .add(Text(GENDER_BTN_ANY), color=KeyboardButtonColor.SECONDARY)
-        .row()
-        .add(Text(MENU_BTN_SEARCH), color=KeyboardButtonColor.POSITIVE)
+    """Клавиатура меню: только поиск собеседника."""
+    keyboard = Keyboard(one_time=False, inline=False).add(
+        Text(MENU_BTN_SEARCH),
+        color=KeyboardButtonColor.POSITIVE,
     )
     return keyboard.get_json()
 

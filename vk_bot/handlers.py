@@ -19,21 +19,14 @@ from vk_bot.chat import (
     partner_reply,
     pick_opener,
     remember_visitor,
-    set_partner_gender,
     stop_chat,
 )
 from vk_bot.config import WELCOME_IMAGE
 from vk_bot.photos import upload_photo
-from vk_bot.premium import send_gender_premium, send_premium
 from vk_bot.ui import (
     CHAT_BTN_NEXT,
     CHAT_BTN_REPORT,
     CHAT_BTN_STOP,
-    GENDER_BTN_ANY,
-    GENDER_BTN_FEMALE,
-    GENDER_BTN_MALE,
-    MENU_BTN_PARTNER_GENDER,
-    MENU_BTN_PREMIUM,
     MENU_BTN_SEARCH,
     WELCOME_TEXT,
     build_chat_keyboard,
@@ -42,6 +35,8 @@ from vk_bot.ui import (
     menu_text,
     new_random_id,
 )
+
+_SEARCH_BUTTONS = {MENU_BTN_SEARCH, "🔍 Поиск", CHAT_BTN_NEXT}
 
 
 def parse_payload(message: Message) -> dict:
@@ -83,7 +78,7 @@ async def handle_stop(message: Message, user_id: int, text: str, chatting: bool,
         return False
     stop_chat(user_id)
     await message.answer(
-        menu_message("Диалог остановлен. Нажми «Поиск», чтобы найти нового собеседника."),
+        menu_message("Диалог остановлен. Нажми «Найти собеседника», чтобы начать снова."),
         keyboard=build_main_keyboard(),
         random_id=new_random_id(),
     )
@@ -105,8 +100,8 @@ async def handle_report(message: Message, user_id: int, text: str, chatting: boo
 
 
 async def handle_search(message: Message, user_id: int, text: str) -> bool:
-    """Запускает поиск по кнопкам «Поиск» и «Следующий собеседник»."""
-    if text not in {MENU_BTN_SEARCH, CHAT_BTN_NEXT}:
+    """Запускает поиск по кнопке «Найти собеседника» или «Следующий собеседник»."""
+    if text not in _SEARCH_BUTTONS:
         return False
     if is_searching(user_id):
         return True
@@ -133,44 +128,6 @@ async def handle_chat_line(message: Message, user_id: int, text: str, chatting: 
     return True
 
 
-async def handle_partner_gender(message: Message, user_id: int, text: str, busy: bool) -> bool:
-    """Даёт выбрать, в какой роли выйдет следующий собеседник."""
-    if busy:
-        return False
-    if text == MENU_BTN_PARTNER_GENDER:
-        await send_gender_premium(message)
-        return True
-
-    choice = {
-        GENDER_BTN_FEMALE: True,
-        GENDER_BTN_MALE: False,
-        GENDER_BTN_ANY: None,
-    }
-    if text not in choice:
-        return False
-    set_partner_gender(user_id, choice[text])
-    if choice[text] is True:
-        note = "В следующем поиске это будет девушка."
-    elif choice[text] is False:
-        note = "В следующем поиске это будет парень."
-    else:
-        note = "В следующем поиске пол снова случайный."
-    await message.answer(
-        menu_message(note),
-        keyboard=build_main_keyboard(),
-        random_id=new_random_id(),
-    )
-    return True
-
-
-async def handle_premium(message: Message, text: str) -> bool:
-    """По кнопке «Премиум доступ» присылает карточку акции и ссылку на оплату."""
-    if text != MENU_BTN_PREMIUM:
-        return False
-    await send_premium(message)
-    return True
-
-
 async def handle_menu_or_dialog(message: Message, user_id: int) -> None:
     """Разбирает меню и реплики диалога."""
     text = (message.text or "").strip()
@@ -186,10 +143,6 @@ async def handle_menu_or_dialog(message: Message, user_id: int) -> None:
     if await handle_chat_line(message, user_id, text, chatting):
         return
     if searching:
-        return
-    if await handle_partner_gender(message, user_id, text, busy=chatting or searching):
-        return
-    if await handle_premium(message, text):
         return
 
     await message.answer(
