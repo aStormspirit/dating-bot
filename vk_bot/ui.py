@@ -125,7 +125,26 @@ def gender_premium_message(name: str) -> str:
     )
 
 
+def _tariff_url(base: str, plan_id: str) -> str:
+    """Добавляет к ссылке оплаты идентификатор тарифа."""
+    separator = "&" if "?" in base else "?"
+    return f"{base}{separator}plan={plan_id}"
+
+
+# plan_id, подпись кнопки, дни, цена. Сайт оплаты читает plan и берёт цену у себя.
+_TARIFFS = (
+    ("trial", "👑 3 дня VIP за 1 ₽", 3, 1),
+    ("start", "Старт · 3 дня · 399 ₽", 3, 399),
+    ("optimal", "Оптимальный · 30 дней · 990 ₽", 30, 990),
+    ("year", "365 дней · 2026 ₽", 365, 2026),
+)
+
+
 def build_premium_keyboard(url: str) -> str:
-    """Кнопка под сообщением открывает сайт оплаты."""
-    keyboard = Keyboard(inline=True).add(OpenLink(url, "👑 3 дня VIP за 1 ₽"))
+    """Кнопки тарифов под сообщением. Каждая открывает оплату своего плана."""
+    keyboard = Keyboard(inline=True)
+    for index, (plan_id, label, *_rest) in enumerate(_TARIFFS):
+        if index:
+            keyboard.row()
+        keyboard.add(OpenLink(_tariff_url(url, plan_id), label))
     return keyboard.get_json()

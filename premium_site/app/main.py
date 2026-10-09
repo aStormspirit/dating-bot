@@ -14,8 +14,13 @@ from fastapi.templating import Jinja2Templates
 
 APP_DIR = Path(__file__).resolve().parent
 DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip()
-OFFER_HOURS = 72
-OFFER_PRICE_RUB = 1
+# id тарифа → название, дни, цена. Совпадает с кнопками в vk_bot/ui.py.
+PLANS = {
+    "trial": ("3 дня VIP", 3, 1),
+    "start": ("Старт", 3, 399),
+    "optimal": ("Оптимальный", 30, 990),
+    "year": ("365 дней", 365, 2026),
+}
 
 app = FastAPI(title="Премиум")
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
@@ -62,13 +67,27 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _plan(plan_id: str) -> tuple[str, str, int, int]:
+    """Возвращает известный тариф. Неизвестный id заменяется акцией за 1 ₽."""
+    key = plan_id if plan_id in PLANS else "trial"
+    title, days, price = PLANS[key]
+    return key, title, days, price
+
+
 @app.get("/", response_class=HTMLResponse)
-def offer_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "index.html", {})
+def offer_page(request: Request, plan: str = "") -> HTMLResponse:
+    selected = plan if plan in PLANS else ""
+    keys = [selected] if selected else list(PLANS)
+    plans = []
+    for key in keys:
+        title, days, price = PLANS[key]
+        plans.append({"id": key, "title": title, "days": days, "price": price})
+    return templates.TemplateResponse(request, "index.html", {"plans": plans})
 
 
 @app.post("/checkout")
-def checkout(vk_id: str = Form(default="")) -> RedirectResponse:
+def checkout(plan: str = Form(default="trial"), vk_id: str = Form(default="")) -> RedirectResponse:
+    _plan_id, _title, days, price = _plan(plan)
     user_id = _vk_user_id(vk_id)
     order_id = uuid4()
     with _connect() as connection:
@@ -77,7 +96,7 @@ def checkout(vk_id: str = Form(default="")) -> RedirectResponse:
             INSERT INTO premium_orders (id, vk_user_id, amount_rub, period_hours, status)
             VALUES (%s, %s, %s, %s, 'pending')
             """,
-            (order_id, user_id, OFFER_PRICE_RUB, OFFER_HOURS),
+            (order_id, user_id, price, days * 24),
         )
     return RedirectResponse(url=f"/orders/{order_id}", status_code=303)
 
@@ -103,6 +122,7 @@ def order_page(request: Request, order_id: UUID) -> HTMLResponse:
             "vk_user_id": row[1],
             "amount": row[2],
             "hours": row[3],
+            "days": max(1, int(row[3]) // 24),
             "status": row[4],
         },
     )

@@ -8,7 +8,17 @@
 </head>
 <body>
   <main>
-    <p>тут будет оплата</p>
+    {% for plan in plans %}
+    <section class="plan">
+      <p class="title">{{ plan.title }}</p>
+      <p class="meta">{{ plan.days }} дн.</p>
+      <p class="price">{{ plan.price }} ₽</p>
+      <form method="post" action="/checkout">
+        <input type="hidden" name="plan" value="{{ plan.id }}">
+        <button type="submit">Оплатить {{ plan.price }} ₽</button>
+      </form>
+    </section>
+    {% endfor %}
   </main>
 </body>
 </html>
