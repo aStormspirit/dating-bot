@@ -69,8 +69,53 @@ def preflight_check(token: str) -> int:
             f"  5. Для подробностей: python diagnose.py"
         )
 
+    ensure_incoming_events(token, group_id)
     check_photo_access(token)
     return group_id
+
+
+def ensure_incoming_events(token: str, group_id: int) -> None:
+    """Включает Long Poll и событие message_new, иначе бот молчит на любое сообщение."""
+    current = requests.post(
+        "https://api.vk.com/method/groups.getLongPollSettings",
+        data={"access_token": token, "group_id": group_id, "v": API_VERSION},
+        timeout=15,
+    ).json()
+    if "error" in current:
+        err = current["error"]
+        print(
+            f"Не прочитал настройки Long Poll group_id={group_id}: "
+            f"VK Error [{err.get('error_code')}] {err.get('error_msg')}"
+        )
+        return
+
+    body = current.get("response") or {}
+    events = dict(body.get("events") or {})
+    was = 1 if events.get("message_new") else 0
+    events["message_new"] = 1
+    params: dict = {
+        "access_token": token,
+        "group_id": group_id,
+        "v": API_VERSION,
+        "enabled": 1,
+        "api_version": API_VERSION,
+    }
+    for name, flag in events.items():
+        params[name] = 1 if flag else 0
+    saved = requests.post(
+        "https://api.vk.com/method/groups.setLongPollSettings",
+        data=params,
+        timeout=15,
+    ).json()
+    if "error" in saved:
+        err = saved["error"]
+        print(
+            f"Не включил message_new group_id={group_id}: "
+            f"VK Error [{err.get('error_code')}] {err.get('error_msg')}. "
+            f"Сейчас message_new={was}."
+        )
+        return
+    print(f"Long Poll message_new включён (group_id={group_id}, было={was}).")
 
 
 def check_photo_access(token: str) -> None:

@@ -73,12 +73,24 @@ class Gateway:
         api = self._vk.get(peer.bot_key)
         if api is None:
             raise RuntimeError(f"Нет сообщества ВК {peer.bot_key}")
-        await api.messages.send(
-            peer_id=peer.user_id,
-            message=text,
-            keyboard=_vk_keyboard(kind),
-            random_id=new_random_id(),
-        )
+        try:
+            await api.messages.send(
+                peer_id=peer.user_id,
+                message=text,
+                keyboard=_vk_keyboard(kind),
+                random_id=new_random_id(),
+            )
+        except Exception as exc:
+            print(
+                f"Клавиатура не принята для {peer.user_id}, шлю текст: "
+                f"{type(exc).__name__}: {exc}",
+                flush=True,
+            )
+            await api.messages.send(
+                peer_id=peer.user_id,
+                message=text,
+                random_id=new_random_id(),
+            )
 
     async def _send_tg(self, peer: Peer, text: str, kind: str, photo: Path | None) -> None:
         bot = self._tg.get(peer.bot_key)

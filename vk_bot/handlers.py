@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from vkbottle.bot import Message
@@ -65,6 +66,21 @@ def _vk_keyboard(kind: str) -> str:
     return build_main_keyboard()
 
 
+async def _answer_vk(message: Message, text: str, kind: str, *, attachment: str | None = None) -> None:
+    """Пишет в тот же диалог. Если клавиатуру отклонили, отправляет тот же текст без неё."""
+    kwargs: dict = {"keyboard": _vk_keyboard(kind), "random_id": new_random_id()}
+    if attachment:
+        kwargs["attachment"] = attachment
+    try:
+        await message.answer(text, **kwargs)
+    except Exception as exc:
+        print(f"Клавиатура не принята, шлю текст: {type(exc).__name__}: {exc}", flush=True)
+        plain: dict = {"random_id": new_random_id()}
+        if attachment:
+            plain["attachment"] = attachment
+        await message.answer(text, **plain)
+
+
 async def _reply(
     peer: Peer,
     text: str,
@@ -75,10 +91,8 @@ async def _reply(
 ) -> bool:
     """Отвечает тому, кто только что написал. Во ВК можно приложить картинку."""
     if vk_message is not None:
-        kwargs: dict = {"keyboard": _vk_keyboard(kind), "random_id": new_random_id()}
-        if photo is not None:
-            kwargs["attachment"] = await upload_photo(vk_message, photo)
-        await vk_message.answer(text, **kwargs)
+        attachment = await upload_photo(vk_message, photo) if photo is not None else None
+        await _answer_vk(vk_message, text, kind, attachment=attachment)
         return True
     return await gateway.send(peer, text, kind, photo=photo)
 
@@ -132,6 +146,7 @@ async def handle_search(peer: Peer, text: str, vk_message: Message | None) -> bo
     if text not in _SEARCH_BUTTONS:
         return False
     if is_searching(peer):
+        await _reply(peer, SEARCHING_TEXT, "chat", vk_message)
         return True
     await connect_with_partner(peer, vk_message)
     return True
@@ -175,8 +190,6 @@ async def handle_menu_or_dialog(peer: Peer, text: str, vk_message: Message | Non
         return
     if await handle_chat_line(peer, text, chatting, vk_message):
         return
-    if searching:
-        return
 
     await _reply(peer, COMMUNITY_GREETING, "main", vk_message)
 
@@ -188,7 +201,10 @@ async def handle_incoming(
     vk_message: Message | None = None,
 ) -> None:
     """Маршрутизирует сообщение из ВК или Telegram: старт, затем меню или диалог."""
-    remember_visitor(peer)
+    try:
+        remember_visitor(peer)
+    except Exception as exc:  # noqa: BLE001 — сбой базы не должен оставлять человека без ответа
+        print(f"Не записал визит {peer.user_id}: {type(exc).__name__}: {exc}", flush=True)
     if await handle_start(peer, text, payload, vk_message):
         return
     await handle_menu_or_dialog(peer, text, vk_message)
@@ -198,23 +214,74 @@ def vk_handler(bot_key: str):
     """Обработчик одного сообщества ВК. Ключ нужен, чтобы ответ ушёл тем же токеном."""
 
     async def _handle(message: Message) -> None:
-        if message.from_id is None or message.from_id <= 0:
-            return
-        text = (message.text or "").strip()
-        payload = parse_payload(message)
-        peer = Peer("vk", bot_key, message.from_id)
-        if message.peer_id != message.from_id:
-            await message.answer(
-                COMMUNITY_GREETING,
+        print(
+            f"VK входящее group={bot_key} from={message.from_id} peer={message.peer_id}",
+            flush=True,
+        )
+        try:
+            if message.from_id is None or message.from_id <= 0:
+                return
+            text = (message.text or "").strip()
+            payload = parse_payload(message)
+            peer = Peer("vk", bot_key, message.from_id)
+            if message.peer_id != message.from_id:
+                await _answer_vk(message, COMMUNITY_GREETING, "main")
+                if _is_start(text, payload):
+                    await connect_with_partner(peer, None)
+                return
+            await handle_incoming(peer, text, payload, message)
+        except Exception as exc:  # noqa: BLE001 — иначе ошибка остаётся только в loguru и в docker её нет
+            print(
+                f"Ошибка ответа group={bot_key} from={message.from_id}: "
+                f"{type(exc).__name__}: {exc}",
+                flush=True,
+            )
+
+    return _handle
+
+
+async def answer_waiting(api: object, bot_key: str) -> None:
+    """Отвечает на чужие сообщения за последний час, которые бот ещё не закрыл своим ответом."""
+    response = await api.request("messages.getConversations", {"count": 20})  # type: ignore[attr-defined]
+    payload = response
+    if isinstance(payload, dict) and "items" not in payload and isinstance(payload.get("response"), dict):
+        payload = payload["response"]
+    items = payload.get("items") if isinstance(payload, dict) else None
+    if not items:
+        print(f"Непрочитанных диалогов нет (group_id={bot_key}).", flush=True)
+        return
+    cutoff = int(time.time()) - 3600
+    for item in items:
+        conversation = item.get("conversation") or {}
+        last = item.get("last_message") or {}
+        peer_id = (conversation.get("peer") or {}).get("id")
+        from_id = int(last.get("from_id") or 0)
+        if not peer_id or from_id <= 0 or int(last.get("out") or 0) == 1:
+            continue
+        if int(last.get("date") or 0) < cutoff:
+            continue
+        try:
+            await api.messages.send(  # type: ignore[attr-defined]
+                peer_id=peer_id,
+                message=COMMUNITY_GREETING,
                 keyboard=build_main_keyboard(),
                 random_id=new_random_id(),
             )
-            if _is_start(text, payload):
-                await connect_with_partner(peer, None)
-            return
-        await handle_incoming(peer, text, payload, message)
-
-    return _handle
+        except Exception as exc:
+            print(
+                f"Клавиатура не принята для peer={peer_id}, шлю текст: {type(exc).__name__}: {exc}",
+                flush=True,
+            )
+            await api.messages.send(  # type: ignore[attr-defined]
+                peer_id=peer_id,
+                message=COMMUNITY_GREETING,
+                random_id=new_random_id(),
+            )
+        try:
+            await api.request("messages.markAsRead", {"peer_id": peer_id})  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001
+            print(f"Не отметил прочитанным peer={peer_id}: {type(exc).__name__}: {exc}", flush=True)
+        print(f"Ответил на ожидающее group={bot_key} peer={peer_id}", flush=True)
 
 
 async def connect_with_partner(peer: Peer, vk_message: Message | None) -> None:
