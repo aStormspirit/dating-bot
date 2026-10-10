@@ -326,45 +326,54 @@ async def answer_waiting(api: object, bot_key: str) -> None:
         print(f"Ответил на ожидающее group={bot_key} peer={peer_id}", flush=True)
 
 
+def _vk_body(response: object) -> dict:
+    """Достаёт словарь ответа VK и из обёртки response, и из уже распакованного тела."""
+    if not isinstance(response, dict):
+        return {}
+    nested = response.get("response")
+    if "items" not in response and isinstance(nested, dict):
+        return nested
+    return response
+
+
 async def attach_start_buttons(api: object, bot_key: str) -> None:
     """Дописывает кнопку «Начать» к свежим приветствиям, которые ушли без неё."""
-    response = await api.request("messages.getConversations", {"count": 20})  # type: ignore[attr-defined]
-    payload = response
-    if isinstance(payload, dict) and "items" not in payload and isinstance(payload.get("response"), dict):
-        payload = payload["response"]
-    items = payload.get("items") if isinstance(payload, dict) else None
-    if not items:
-        return
-    cutoff = int(time.time()) - 3600
+    response = await api.request("messages.getConversations", {"count": 30})  # type: ignore[attr-defined]
+    items = _vk_body(response).get("items") or []
     for item in items:
-        conversation = item.get("conversation") or {}
-        last = item.get("last_message") or {}
-        peer_id = (conversation.get("peer") or {}).get("id")
-        text = last.get("text") or ""
-        if not peer_id or int(last.get("out") or 0) != 1 or "Нажми кнопку начать" not in text:
+        peer_id = ((item.get("conversation") or {}).get("peer") or {}).get("id")
+        if not peer_id:
             continue
-        if int(last.get("date") or 0) < cutoff:
-            continue
-        edit: dict = {
-            "peer_id": peer_id,
-            "message": text,
-            "keyboard": build_main_keyboard(),
-        }
-        if last.get("conversation_message_id"):
-            edit["conversation_message_id"] = last["conversation_message_id"]
-        elif last.get("id"):
-            edit["message_id"] = last["id"]
-        else:
-            continue
-        try:
-            await api.messages.edit(**edit)  # type: ignore[attr-defined]
-        except Exception as exc:  # noqa: BLE001
-            print(
-                f"Не добавил кнопку group={bot_key} peer={peer_id}: {type(exc).__name__}: {exc}",
-                flush=True,
-            )
-            continue
-        print(f"Добавил кнопку Начать group={bot_key} peer={peer_id}", flush=True)
+        history = await api.request(  # type: ignore[attr-defined]
+            "messages.getHistory",
+            {"peer_id": peer_id, "count": 8},
+        )
+        for message in _vk_body(history).get("items") or []:
+            text = message.get("text") or ""
+            if int(message.get("out") or 0) != 1 or "Нажми кнопку начать" not in text:
+                continue
+            edit: dict = {
+                "peer_id": peer_id,
+                "message": text,
+                "keyboard": build_main_keyboard(),
+            }
+            if message.get("conversation_message_id"):
+                edit["conversation_message_id"] = message["conversation_message_id"]
+            elif message.get("id"):
+                edit["message_id"] = message["id"]
+            else:
+                break
+            try:
+                await api.messages.edit(**edit)  # type: ignore[attr-defined]
+            except Exception as exc:  # noqa: BLE001
+                print(
+                    f"Не добавил кнопку group={bot_key} peer={peer_id}: "
+                    f"{type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+            else:
+                print(f"Добавил кнопку Начать group={bot_key} peer={peer_id}", flush=True)
+            break
 
 
 async def connect_with_partner(peer: Peer, vk_message: Message | None) -> None:

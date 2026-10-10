@@ -70,6 +70,7 @@ def preflight_check(token: str) -> int:
         )
 
     ensure_incoming_events(token, group_id)
+    ensure_bot_capabilities(token, group_id)
     check_photo_access(token)
     return group_id
 
@@ -117,6 +118,30 @@ def ensure_incoming_events(token: str, group_id: int) -> None:
         )
         return
     print(f"Long Poll message_new включён (group_id={group_id}, было={was}).")
+
+
+def ensure_bot_capabilities(token: str, group_id: int) -> None:
+    """Включает клавиатуры сообщества. Иначе VK отвечает 912 и кнопка не уходит."""
+    saved = requests.post(
+        "https://api.vk.com/method/groups.setSettings",
+        data={
+            "access_token": token,
+            "group_id": group_id,
+            "v": API_VERSION,
+            "bots_capabilities": 1,
+            "bots_start_button": 1,
+            "bots_add_to_chat": 1,
+        },
+        timeout=15,
+    ).json()
+    if "error" in saved:
+        err = saved["error"]
+        print(
+            f"Не включил возможности ботов group_id={group_id}: "
+            f"VK Error [{err.get('error_code')}] {err.get('error_msg')}"
+        )
+        return
+    print(f"Возможности ботов включены (group_id={group_id}).")
 
 
 def check_photo_access(token: str) -> None:
