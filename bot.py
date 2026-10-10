@@ -8,7 +8,7 @@ load_dotenv()
 
 from vkbottle.bot import Bot
 
-from vk_bot.config import ABLIT_API_KEY, TOKEN
+from vk_bot.config import TOKEN
 from vk_bot.handlers import handle_message
 from vk_bot.startup import preflight_check, rebuild_vkbottle_response_models
 
@@ -27,10 +27,7 @@ def main() -> None:
 
     print(f"OK: доступ к Long Poll есть (group_id={group_id})")
     print("Сессии диалогов хранятся в Supabase Postgres.")
-    if ABLIT_API_KEY:
-        print("ИИ-собеседник включён: после опенера отвечает Abliteration.")
-    else:
-        print("ABLIT_KEY не задан: после опенера бот ответит заготовками, без ИИ.")
+    print("Анонимный чат: сообщения пересылаются живому собеседнику.")
     print("Бот запущен. Ожидание сообщений...")
     try:
         bot.run()

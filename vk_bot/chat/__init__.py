@@ -1,31 +1,27 @@
-"""Публичный фасад анонимного чата: поиск, остановка и ответ собеседника."""
+"""Публичный фасад анонимного чата: поиск живого собеседника и пересылка реплик."""
 
-from vk_bot.chat.openers import pick_opener
-from vk_bot.chat.replies import partner_reply
 from vk_bot.chat.session import (
+    FOUND_TEXT,
     SEARCHING_TEXT,
     begin_search,
-    complete_search,
     format_partner,
     is_chatting,
     is_searching,
-    opener_pending,
+    pair_searcher,
+    partner_of,
     remember_visitor,
-    set_partner_gender,
     stop_chat,
 )
 
 __all__ = (
+    "FOUND_TEXT",
     "SEARCHING_TEXT",
     "begin_search",
-    "complete_search",
     "format_partner",
     "is_chatting",
     "is_searching",
-    "opener_pending",
-    "partner_reply",
-    "pick_opener",
+    "pair_searcher",
+    "partner_of",
     "remember_visitor",
-    "set_partner_gender",
     "stop_chat",
 )

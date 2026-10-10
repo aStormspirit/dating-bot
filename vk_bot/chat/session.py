@@ -52,6 +52,7 @@ class _Session:
     user_name: str | None = None
     user_city: str | None = None
     last_reply: str | None = None
+    partner_id: int | None = None
     preferred_female: bool | None = None
     partner_choice: str | None = None
     blocked: bool = False
@@ -84,18 +85,33 @@ def remember_visitor(user_id: int) -> None:
     touch_bot_user(user_id)
 
 
-def stop_chat(user_id: int) -> None:
-    """Прерывает поиск или диалог и отменяет отложенные реплики этого поиска."""
-    state = _session(user_id)
+def _clear_dialog(state: _Session) -> None:
+    """Сбрасывает диалог, не трогая выбор пола на будущее."""
     state.phase = "idle"
     state.generation += 1
     state.persona = None
+    state.partner_id = None
     state.user_name = None
     state.user_city = None
     state.blocked = False
     state.history.clear()
     state.last_reply = None
+
+
+def stop_chat(user_id: int) -> int | None:
+    """Прерывает поиск или диалог. Возвращает id собеседника, если пара была."""
+    state = _session(user_id)
+    partner_id = state.partner_id
+    _clear_dialog(state)
     _persist_user(user_id)
+    if partner_id is None:
+        return None
+    partner = _session(partner_id)
+    if partner.partner_id != user_id:
+        return None
+    _clear_dialog(partner)
+    _persist_user(partner_id)
+    return partner_id
 
 
 def begin_search(user_id: int) -> int:
@@ -104,6 +120,7 @@ def begin_search(user_id: int) -> int:
     state.generation += 1
     state.phase = "searching"
     state.persona = None
+    state.partner_id = None
     state.user_name = None
     state.user_city = None
     state.last_reply = None
@@ -112,6 +129,42 @@ def begin_search(user_id: int) -> int:
     _persist_user(user_id)
     record_search(user_id)
     return state.generation
+
+
+def partner_of(user_id: int) -> int | None:
+    """Id живого собеседника, если диалог ещё связан с двух сторон."""
+    state = _session(user_id)
+    partner_id = state.partner_id
+    if state.phase != "chatting" or partner_id is None:
+        return None
+    partner = _sessions.get(partner_id)
+    if partner is None or partner.phase != "chatting" or partner.partner_id != user_id:
+        return None
+    return partner_id
+
+
+def pair_searcher(user_id: int, generation: int) -> tuple[int, bool] | None:
+    """Соединяет ищущего с другим ищущим. Второй элемент — создана ли пара этим вызовом."""
+    state = _session(user_id)
+    if state.generation != generation:
+        return None
+    if state.phase == "chatting" and state.partner_id is not None:
+        return state.partner_id, False
+    if state.phase != "searching":
+        return None
+    for other_id, other in _sessions.items():
+        if other_id == user_id or other.phase != "searching" or other.partner_id is not None:
+            continue
+        state.phase = "chatting"
+        other.phase = "chatting"
+        state.partner_id = other_id
+        other.partner_id = user_id
+        state.persona = None
+        other.persona = None
+        _persist_user(user_id)
+        _persist_user(other_id)
+        return other_id, True
+    return None
 
 
 def set_partner_gender(user_id: int, female: bool | None) -> None:
@@ -211,6 +264,7 @@ def _session_to_dict(state: _Session) -> dict:
         "user_city": state.user_city,
         "last_reply": state.last_reply,
         "blocked": state.blocked,
+        "partner_id": state.partner_id,
         "history": state.history,
     }
     if state.preferred_female is not None:
@@ -239,6 +293,7 @@ def _session_from_dict(raw: dict) -> _Session:
         user_name=raw.get("user_name"),
         user_city=raw.get("user_city"),
         last_reply=raw.get("last_reply"),
+        partner_id=int(raw["partner_id"]) if raw.get("partner_id") else None,
         preferred_female=None if preferred is None else bool(preferred),
         blocked=bool(raw.get("blocked")),
         history=_history_from_raw(raw),
@@ -291,8 +346,8 @@ def _apply_saved_profile(state: _Session, profile: dict) -> None:
 
 
 def _should_store(state: _Session) -> bool:
-    """В базе остаются активный диалог и выбранный пол следующего партнёра."""
-    return state.phase == "chatting" or state.preferred_female is not None
+    """В базе остаётся диалог двух людей и выбранный пол следующего партнёра."""
+    return (state.phase == "chatting" and state.partner_id is not None) or state.preferred_female is not None
 
 
 def _persist_user(user_id: int) -> None:
@@ -336,6 +391,19 @@ def _import_legacy_file() -> int:
     return imported
 
 
+def _repair_pairs() -> None:
+    """Снимает диалоги с ботом и пары, у которых вторая сторона уже не отвечает."""
+    for user_id, state in list(_sessions.items()):
+        if partner_of(user_id) is not None:
+            continue
+        if state.phase != "chatting" and state.partner_id is None:
+            continue
+        state.phase = "idle"
+        state.partner_id = None
+        state.persona = None
+        _persist_user(user_id)
+
+
 def load_chats() -> None:
     """Поднимает диалоги и профили из Supabase Postgres, затем добирает старый chats.json."""
     ensure_schema()
@@ -353,6 +421,7 @@ def load_chats() -> None:
         )
     for profile in fetch_bot_users():
         _apply_saved_profile(_session(profile["user_id"]), profile)
+    _repair_pairs()
 
 
 load_chats()

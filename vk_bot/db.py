@@ -99,7 +99,8 @@ def fetch_sessions() -> list[tuple[int, dict[str, Any]]]:
     rows = _execute(
         """
         SELECT user_id, phase, generation, persona, user_gender, user_age,
-               user_name, user_city, last_reply, preferred_female, blocked, history
+               user_name, user_city, last_reply, preferred_female, blocked, history,
+               partner_id
         FROM chat_sessions
         """
     ).fetchall()
@@ -116,6 +117,7 @@ def fetch_sessions() -> list[tuple[int, dict[str, Any]]]:
             "last_reply": row["last_reply"],
             "blocked": row["blocked"],
             "history": row["history"] or [],
+            "partner_id": row["partner_id"],
         }
         if row["preferred_female"] is not None:
             payload["preferred_female"] = row["preferred_female"]
@@ -130,11 +132,12 @@ def save_session(user_id: int, payload: dict[str, Any]) -> None:
         """
         INSERT INTO chat_sessions (
             user_id, phase, generation, persona, user_gender, user_age,
-            user_name, user_city, last_reply, preferred_female, blocked, history, updated_at
+            user_name, user_city, last_reply, preferred_female, blocked, history,
+            partner_id, updated_at
         ) VALUES (
             %(user_id)s, %(phase)s, %(generation)s, %(persona)s, %(user_gender)s, %(user_age)s,
             %(user_name)s, %(user_city)s, %(last_reply)s, %(preferred_female)s, %(blocked)s,
-            %(history)s, NOW()
+            %(history)s, %(partner_id)s, NOW()
         )
         ON CONFLICT (user_id) DO UPDATE SET
             phase = EXCLUDED.phase,
@@ -148,6 +151,7 @@ def save_session(user_id: int, payload: dict[str, Any]) -> None:
             preferred_female = EXCLUDED.preferred_female,
             blocked = EXCLUDED.blocked,
             history = EXCLUDED.history,
+            partner_id = EXCLUDED.partner_id,
             updated_at = NOW()
         """,
         {
@@ -163,6 +167,7 @@ def save_session(user_id: int, payload: dict[str, Any]) -> None:
             "preferred_female": payload.get("preferred_female"),
             "blocked": bool(payload.get("blocked")),
             "history": Jsonb(payload.get("history") or []),
+            "partner_id": payload.get("partner_id"),
         },
     )
 

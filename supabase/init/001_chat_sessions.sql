@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     last_reply TEXT,
     preferred_female BOOLEAN,
     blocked BOOLEAN NOT NULL DEFAULT FALSE,
+    partner_id BIGINT,
     history JSONB NOT NULL DEFAULT '[]'::jsonb,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
