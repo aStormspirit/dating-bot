@@ -22,24 +22,39 @@ if [ ! -f .env ] && [ -z "${ENV_FILE:-}" ]; then
   exit 1
 fi
 
+sync_env_key() {
+  key=$1
+  required=$2
+  line=$(grep -E "^${key}=" "$secret_file" | tail -n 1 || true)
+  if [ -z "$line" ]; then
+    if [ "$required" = "yes" ] && ! grep -qE "^${key}=.+" .env; then
+      echo "В секрете ENV_FILE нет строки ${key}, и в .env на сервере её тоже нет." >&2
+      exit 1
+    fi
+    if [ "$required" = "yes" ]; then
+      echo "В секрете ENV_FILE нет ${key}. Оставляю значение из .env на сервере."
+    fi
+    return
+  fi
+  tmp=$(mktemp)
+  grep -v "^${key}=" .env > "$tmp" || true
+  printf '%s\n' "$line" >> "$tmp"
+  mv "$tmp" .env
+  chmod 600 .env
+  echo "${key} на сервере обновлён из ENV_FILE."
+}
+
 if [ -n "${ENV_FILE:-}" ]; then
   secret_file=$(mktemp)
   printf '%s\n' "$ENV_FILE" | tr -d '\r' > "$secret_file"
-  token_line=$(grep -E '^VK_TOKEN=' "$secret_file" | tail -n 1 || true)
-  rm -f "$secret_file"
-  if [ -z "$token_line" ]; then
-    echo "В секрете ENV_FILE нет строки VK_TOKEN." >&2
-    exit 1
-  fi
   if [ ! -f .env ]; then
     : > .env
   fi
-  tmp=$(mktemp)
-  grep -v '^VK_TOKEN=' .env > "$tmp" || true
-  printf '%s\n' "$token_line" >> "$tmp"
-  mv "$tmp" .env
-  chmod 600 .env
-  echo "VK_TOKEN на сервере обновлён из ENV_FILE."
+  sync_env_key VK_TOKEN yes
+  sync_env_key VK_TOKENS no
+  sync_env_key TG_TOKEN no
+  sync_env_key TG_TOKENS no
+  rm -f "$secret_file"
 fi
 
 PAY_HOST="${PAY_HOST:-pay.chatwithyou.site}"
@@ -86,7 +101,7 @@ docker compose --profile proxy up -d --no-build --remove-orphans db
 docker compose --profile proxy up -d --no-build --remove-orphans --force-recreate bot premium
 docker restart vk-bot-caddy
 sleep 12
-docker logs vk-bot --tail 80 2>&1 | grep -E "Колонки bot_users|OK:|Нет права|Нет доступа|Токен невалиден|Бот запущен|Ошибка запуска|VK Error|Traceback" || true
+docker logs vk-bot --tail 80 2>&1 | grep -E "Колонки bot_users|VK:|Telegram:|OK:|Нет права|Нет доступа|Токен невалиден|Бот запущен|Ошибка запуска|VK Error|Traceback" || true
 sleep 8
 docker logs vk-bot-caddy --tail 20 || true
 docker image prune -af
