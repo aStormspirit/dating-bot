@@ -1,0 +1,31 @@
+name: Server logs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read bot container logs
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          command_timeout: 5m
+          envs: DEPLOY_PATH
+          script: |
+            set -eu
+            if [ -n "${DEPLOY_PATH:-}" ]; then
+              APP_DIR="$DEPLOY_PATH"
+            else
+              APP_DIR="${HOME}/dating-bot"
+            fi
+            cd "$APP_DIR"
+            docker ps -a --filter name=vk-bot --format 'table {{.Names}}\t{{.Status}}'
+            echo '--- LOGS ---'
+            docker logs vk-bot --tail 200 2>&1 || true
