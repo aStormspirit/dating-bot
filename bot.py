@@ -42,9 +42,12 @@ async def _run() -> None:
     if first_group is not None:
         adopt_legacy_vk(first_group)
     if telegram:
-        from vk_bot.telegram_bot import telegram_runners
+        try:
+            from vk_bot.telegram_bot import telegram_runners
 
-        runners.extend(await telegram_runners(telegram, gateway))
+            runners.extend(await telegram_runners(telegram, gateway))
+        except Exception as exc:  # noqa: BLE001 — ВК должен работать, даже если Telegram недоступен
+            print(f"Telegram не запущен: {type(exc).__name__}: {exc}", file=sys.stderr)
 
     print("Сессии диалогов хранятся в Supabase Postgres.")
     print("Анонимный чат: сообщения пересылаются живому собеседнику.")
