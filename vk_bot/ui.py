@@ -4,14 +4,12 @@ import random
 
 from vkbottle import Keyboard, KeyboardButtonColor, OpenLink, Text
 
-_MENU_HEAD = "😋 Вместе с вами общаются 🟢"
-_MENU_TAIL = "👇 Выберите действие в меню: 👇"
+MENU_TEXT = "Найди собеседника прямо сейчас"
 
 
 def menu_text() -> str:
-    """Текст меню с новым числом онлайн при каждом показе."""
-    online = random.randint(3000, 3500)
-    return f"{_MENU_HEAD}{online} человек\n{_MENU_TAIL}"
+    """Короткий текст меню без счётчика людей онлайн."""
+    return MENU_TEXT
 WELCOME_TEXT = "Привет! 👋 Это чат для анонимных знакомств, флирта и лёгкого общения."
 
 MENU_BTN_SEARCH = "🔍 Найти собеседника"
@@ -30,7 +28,7 @@ def menu_message(text: str = "") -> str:
     """Для уже знакомого пользователя ответ начинается с текста меню."""
     cleaned = text.strip()
     header = menu_text()
-    if not cleaned or cleaned.startswith(_MENU_HEAD):
+    if not cleaned or cleaned.startswith(header):
         return header if not cleaned else cleaned
     return f"{header}\n\n{cleaned}"
 

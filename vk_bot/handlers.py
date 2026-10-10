@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from vkbottle.bot import Message
 
@@ -19,6 +20,8 @@ from vk_bot.chat import (
     stop_chat,
 )
 from vk_bot.config import WELCOME_IMAGE
+from vk_bot.gateway import gateway
+from vk_bot.peer import Peer
 from vk_bot.photos import upload_photo
 from vk_bot.ui import (
     CHAT_BTN_NEXT,
@@ -48,174 +51,180 @@ def parse_payload(message: Message) -> dict:
         return {}
 
 
-def is_start_message(message: Message) -> bool:
+def _is_start(text: str, payload: dict) -> bool:
     """Сообщение «Начать», /start или команда start из payload."""
-    text = (message.text or "").strip().lower()
-    if text in ("начать", "/start", "start"):
+    lowered = text.strip().lower()
+    command = lowered.split()[0].split("@", 1)[0] if lowered else ""
+    if command in {"начать", "/start", "start"}:
         return True
-    return parse_payload(message).get("command") == "start"
+    return payload.get("command") == "start"
 
 
-async def _tell(message: Message, user_id: int, text: str, keyboard: str) -> bool:
-    """Отправляет текст другому пользователю. False, если ВК не принял сообщение."""
-    try:
-        await message.ctx_api.messages.send(
-            peer_id=user_id,
-            message=text,
-            keyboard=keyboard,
-            random_id=new_random_id(),
-        )
-    except Exception as exc:  # noqa: BLE001 — сбой доставки не должен ронять общий обработчик
-        print(f"Не удалось написать {user_id}: {type(exc).__name__}: {exc}")
-        return False
-    return True
+def _vk_keyboard(kind: str) -> str:
+    """JSON клавиатуры ВК для ответа в том же сообщении."""
+    if kind == "chat":
+        return build_chat_keyboard()
+    return build_main_keyboard()
 
 
-async def _notify_left(message: Message, partner_id: int) -> None:
+async def _reply(
+    peer: Peer,
+    text: str,
+    kind: str,
+    vk_message: Message | None,
+    *,
+    photo: Path | None = None,
+) -> bool:
+    """Отвечает тому, кто только что написал. Во ВК можно приложить картинку."""
+    if vk_message is not None:
+        kwargs: dict = {"keyboard": _vk_keyboard(kind), "random_id": new_random_id()}
+        if photo is not None:
+            kwargs["attachment"] = await upload_photo(vk_message, photo)
+        await vk_message.answer(text, **kwargs)
+        return True
+    return await gateway.send(peer, text, kind, photo=photo)
+
+
+async def _notify_left(partner: Peer) -> None:
     """Сообщает второй стороне, что диалог закончился."""
-    await _tell(message, partner_id, menu_message(_PARTNER_LEFT), build_main_keyboard())
+    await gateway.send(partner, menu_message(_PARTNER_LEFT), "main")
 
 
-async def handle_start(message: Message, user_id: int) -> bool:
+async def handle_start(peer: Peer, text: str, payload: dict, vk_message: Message | None) -> bool:
     """Сбрасывает текущий диалог и открывает меню."""
-    if not is_start_message(message):
+    if not _is_start(text, payload):
         return False
-    partner_id = stop_chat(user_id)
-    await message.answer(
-        f"{WELCOME_TEXT}\n\n{menu_text()}",
-        attachment=await upload_photo(message, WELCOME_IMAGE),
-        keyboard=build_main_keyboard(),
-        random_id=new_random_id(),
-    )
-    if partner_id is not None:
-        await _notify_left(message, partner_id)
+    partner = stop_chat(peer)
+    await _reply(peer, f"{WELCOME_TEXT}\n\n{menu_text()}", "main", vk_message, photo=WELCOME_IMAGE)
+    if partner is not None:
+        await _notify_left(partner)
     return True
 
 
-async def handle_stop(message: Message, user_id: int, text: str, chatting: bool, searching: bool) -> bool:
+async def handle_stop(
+    peer: Peer,
+    text: str,
+    chatting: bool,
+    searching: bool,
+    vk_message: Message | None,
+) -> bool:
     """Заканчивает диалог или поиск и возвращает основное меню."""
     if text != CHAT_BTN_STOP or not (chatting or searching):
         return False
-    partner_id = stop_chat(user_id)
-    await message.answer(
+    partner = stop_chat(peer)
+    await _reply(
+        peer,
         menu_message("Диалог остановлен. Нажми «Найти собеседника», чтобы начать снова."),
-        keyboard=build_main_keyboard(),
-        random_id=new_random_id(),
+        "main",
+        vk_message,
     )
-    if partner_id is not None:
-        await _notify_left(message, partner_id)
+    if partner is not None:
+        await _notify_left(partner)
     return True
 
 
-async def handle_report(message: Message, user_id: int, text: str, chatting: bool) -> bool:
+async def handle_report(peer: Peer, text: str, chatting: bool, vk_message: Message | None) -> bool:
     """Принимает жалобу в активном диалоге и сразу ищет другого собеседника."""
     if text != CHAT_BTN_REPORT or not chatting:
         return False
-    stop_chat(user_id)
-    await message.answer(
-        menu_message("Жалоба отправлена. Ищем другого собеседника."),
-        keyboard=build_chat_keyboard(),
-        random_id=new_random_id(),
-    )
-    await connect_with_partner(message, user_id)
+    await _reply(peer, menu_message("Жалоба отправлена. Ищем другого собеседника."), "chat", vk_message)
+    await connect_with_partner(peer, vk_message)
     return True
 
 
-async def handle_search(message: Message, user_id: int, text: str) -> bool:
+async def handle_search(peer: Peer, text: str, vk_message: Message | None) -> bool:
     """Запускает поиск по кнопке «Найти собеседника» или «Следующий собеседник»."""
     if text not in _SEARCH_BUTTONS:
         return False
-    if is_searching(user_id):
+    if is_searching(peer):
         return True
-    await connect_with_partner(message, user_id)
+    await connect_with_partner(peer, vk_message)
     return True
 
 
-async def handle_chat_line(message: Message, user_id: int, text: str, chatting: bool) -> bool:
+async def handle_chat_line(
+    peer: Peer,
+    text: str,
+    chatting: bool,
+    vk_message: Message | None,
+) -> bool:
     """Пересылает текст живому собеседнику."""
     if not chatting:
         return False
     if not text:
-        await message.answer(
-            "Напиши текстом.",
-            keyboard=build_chat_keyboard(),
-            random_id=new_random_id(),
-        )
+        await _reply(peer, "Напиши текстом.", "chat", vk_message)
         return True
-    partner_id = partner_of(user_id)
-    if partner_id is None:
-        stop_chat(user_id)
-        await message.answer(
-            menu_message(_PARTNER_LEFT),
-            keyboard=build_main_keyboard(),
-            random_id=new_random_id(),
-        )
+    partner = partner_of(peer)
+    if partner is None:
+        stop_chat(peer)
+        await _reply(peer, menu_message(_PARTNER_LEFT), "main", vk_message)
         return True
-    delivered = await _tell(message, partner_id, format_partner(text), build_chat_keyboard())
+    delivered = await gateway.send(partner, format_partner(text), "chat")
     if delivered:
         return True
-    stop_chat(user_id)
-    await message.answer(
-        menu_message("Не удалось доставить сообщение. Диалог остановлен."),
-        keyboard=build_main_keyboard(),
-        random_id=new_random_id(),
-    )
+    stop_chat(peer)
+    await _reply(peer, menu_message("Не удалось доставить сообщение. Диалог остановлен."), "main", vk_message)
     return True
 
 
-async def handle_menu_or_dialog(message: Message, user_id: int) -> None:
+async def handle_menu_or_dialog(peer: Peer, text: str, vk_message: Message | None) -> None:
     """Разбирает меню и реплики диалога."""
-    text = (message.text or "").strip()
-    chatting = is_chatting(user_id)
-    searching = is_searching(user_id)
+    chatting = is_chatting(peer)
+    searching = is_searching(peer)
 
-    if await handle_stop(message, user_id, text, chatting, searching):
+    if await handle_stop(peer, text, chatting, searching, vk_message):
         return
-    if await handle_report(message, user_id, text, chatting):
+    if await handle_report(peer, text, chatting, vk_message):
         return
-    if await handle_search(message, user_id, text):
+    if await handle_search(peer, text, vk_message):
         return
-    if await handle_chat_line(message, user_id, text, chatting):
+    if await handle_chat_line(peer, text, chatting, vk_message):
         return
     if searching:
         return
 
-    await message.answer(
-        menu_message(),
-        keyboard=build_main_keyboard(),
-        random_id=new_random_id(),
-    )
+    await _reply(peer, menu_message(), "main", vk_message)
 
 
-async def handle_message(message: Message) -> None:
-    """Маршрутизирует сообщение: старт, затем меню или диалог."""
-    user_id = message.from_id
-    remember_visitor(user_id)
-    if await handle_start(message, user_id):
+async def handle_incoming(
+    peer: Peer,
+    text: str,
+    payload: dict,
+    vk_message: Message | None = None,
+) -> None:
+    """Маршрутизирует сообщение из ВК или Telegram: старт, затем меню или диалог."""
+    remember_visitor(peer)
+    if await handle_start(peer, text, payload, vk_message):
         return
-    await handle_menu_or_dialog(message, user_id)
+    await handle_menu_or_dialog(peer, text, vk_message)
 
 
-async def connect_with_partner(message: Message, user_id: int) -> None:
+def vk_handler(bot_key: str):
+    """Обработчик одного сообщества ВК. Ключ нужен, чтобы ответ ушёл тем же токеном."""
+
+    async def _handle(message: Message) -> None:
+        await handle_incoming(
+            Peer("vk", bot_key, message.from_id),
+            (message.text or "").strip(),
+            parse_payload(message),
+            message,
+        )
+
+    return _handle
+
+
+async def connect_with_partner(peer: Peer, vk_message: Message | None) -> None:
     """Ставит пользователя в поиск и соединяет с другим живым человеком, если он уже ждёт."""
-    previous = stop_chat(user_id)
-    generation = begin_search(user_id)
-    await message.answer(
-        SEARCHING_TEXT,
-        keyboard=build_chat_keyboard(),
-        random_id=new_random_id(),
-    )
+    previous = stop_chat(peer)
+    generation = begin_search(peer)
+    await _reply(peer, SEARCHING_TEXT, "chat", vk_message)
     if previous is not None:
-        await _notify_left(message, previous)
-    paired = pair_searcher(user_id, generation)
+        await _notify_left(previous)
+    paired = pair_searcher(peer, generation)
     if paired is None:
         return
-    partner_id, created = paired
+    partner, created = paired
     if not created:
         return
-    await message.answer(
-        FOUND_TEXT,
-        keyboard=build_chat_keyboard(),
-        random_id=new_random_id(),
-    )
-    await _tell(message, partner_id, FOUND_TEXT, build_chat_keyboard())
+    await _reply(peer, FOUND_TEXT, "chat", vk_message)
+    await gateway.send(partner, FOUND_TEXT, "chat")

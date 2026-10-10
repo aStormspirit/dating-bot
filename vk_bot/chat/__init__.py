@@ -3,6 +3,7 @@
 from vk_bot.chat.session import (
     FOUND_TEXT,
     SEARCHING_TEXT,
+    adopt_legacy_vk,
     begin_search,
     format_partner,
     is_chatting,
@@ -16,6 +17,7 @@ from vk_bot.chat.session import (
 __all__ = (
     "FOUND_TEXT",
     "SEARCHING_TEXT",
+    "adopt_legacy_vk",
     "begin_search",
     "format_partner",
     "is_chatting",

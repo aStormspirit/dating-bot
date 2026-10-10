@@ -1,4 +1,5 @@
 vkbottle>=4.3.12
+aiogram>=3.13
 python-dotenv>=1.0.0
 requests>=2.31.0
 langgraph>=0.4.0
