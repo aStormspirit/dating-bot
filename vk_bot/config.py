@@ -1,6 +1,7 @@
 """Настройки запуска: токен, версия API и подключение к базе."""
 
 import os
+import re
 from pathlib import Path
 
 TOKEN = (os.getenv("VK_TOKEN") or "").strip()
@@ -18,14 +19,24 @@ def _token_list(*raw_values: str) -> list[str]:
     return found
 
 
+_TG_TOKEN = re.compile(r"^\d{6,}:[A-Za-z0-9_-]{20,}$")
+
+
 def vk_tokens() -> list[str]:
     """Токены сообществ ВК. Первый — исходное сообщество, к нему крепятся старые диалоги."""
-    return _token_list(os.getenv("VK_TOKEN") or "", os.getenv("VK_TOKENS") or "")
+    raw = _token_list(os.getenv("VK_TOKEN") or "", os.getenv("VK_TOKENS") or "")
+    return [token for token in raw if not _TG_TOKEN.match(token)]
 
 
 def tg_tokens() -> list[str]:
     """Токены ботов Telegram. Пустой список — бот работает только во ВК."""
-    return _token_list(os.getenv("TG_TOKEN") or "", os.getenv("TG_TOKENS") or "")
+    raw = _token_list(
+        os.getenv("TG_TOKEN") or "",
+        os.getenv("TG_TOKENS") or "",
+        os.getenv("VK_TOKEN") or "",
+        os.getenv("VK_TOKENS") or "",
+    )
+    return [token for token in raw if _TG_TOKEN.match(token)]
 
 
 # Диалог после опенера идёт через Abliteration. Ключ: https://docs.abliteration.ai/quickstart

@@ -28,8 +28,13 @@ async def _run() -> None:
     rebuild_vkbottle_response_models()
     runners = []
     first_group: str | None = None
+    print(f"Токенов ВК: {len(tokens)}. Токенов Telegram: {len(telegram)}.")
     for token in tokens:
-        group_id = preflight_check(token)
+        try:
+            group_id = preflight_check(token)
+        except SystemExit as exc:
+            print(f"Токен сообщества ВК пропущен: {exc}", file=sys.stderr)
+            continue
         bot_key = str(group_id)
         if first_group is None:
             first_group = bot_key
@@ -38,6 +43,8 @@ async def _run() -> None:
         bot.on.message()(vk_handler(bot_key))
         runners.append(bot.run_polling())
         print(f"VK: доступ к Long Poll есть (group_id={group_id})")
+    if tokens and not runners:
+        raise SystemExit("Ни одно сообщество ВК не прошло проверку Long Poll.")
 
     if first_group is not None:
         adopt_legacy_vk(first_group)
