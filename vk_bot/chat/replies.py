@@ -136,12 +136,7 @@ def _scripted_reply(state: _Session, cleaned: str, learned: set[str]) -> str:
         return _remember(state, reply)
 
     if "age" in learned and state.user_age:
-        if state.user_gender is None:
-            reply = f"{state.user_age} — нормально) а пол так и не написал. ты м или ж?"
-        elif persona.female:
-            reply = f"{state.user_age}) поняла. из какого ты города?"
-        else:
-            reply = f"{state.user_age}) понял. из какого ты города?"
+        reply = f"{state.user_age}) поняла. из какого ты города?" if persona.female else f"{state.user_age}) понял. из какого ты города?"
         return _remember(state, reply)
 
     if _tokens(low) & {"пока", "бб", "спокойной", "свидания", "прощай"}:

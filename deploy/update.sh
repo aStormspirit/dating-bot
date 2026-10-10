@@ -82,7 +82,8 @@ fi
 
 docker compose --profile proxy pull
 docker logout >/dev/null 2>&1 || true
-docker compose --profile proxy up -d --no-build --remove-orphans --force-recreate bot
+docker compose --profile proxy up -d --no-build --remove-orphans db
+docker compose --profile proxy up -d --no-build --remove-orphans --force-recreate bot premium
 docker restart vk-bot-caddy
 sleep 12
 docker logs vk-bot --tail 80 2>&1 | grep -E "Колонки bot_users|OK:|Нет права|Нет доступа|Токен невалиден|Бот запущен|Ошибка запуска|VK Error|Traceback" || true
