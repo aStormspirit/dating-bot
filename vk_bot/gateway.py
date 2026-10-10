@@ -10,7 +10,7 @@ from vk_bot.ui import (
     CHAT_BTN_NEXT,
     CHAT_BTN_REPORT,
     CHAT_BTN_STOP,
-    MENU_BTN_SEARCH,
+    START_BTN,
     build_chat_keyboard,
     build_main_keyboard,
     new_random_id,
@@ -35,7 +35,7 @@ def _tg_keyboard(kind: str):
             [KeyboardButton(text=CHAT_BTN_REPORT)],
         ]
     else:
-        rows = [[KeyboardButton(text=MENU_BTN_SEARCH)]]
+        rows = [[KeyboardButton(text=START_BTN)]]
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 

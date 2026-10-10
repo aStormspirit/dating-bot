@@ -19,7 +19,6 @@ from vk_bot.chat import (
     remember_visitor,
     stop_chat,
 )
-from vk_bot.config import WELCOME_IMAGE
 from vk_bot.gateway import gateway
 from vk_bot.peer import Peer
 from vk_bot.photos import upload_photo
@@ -27,16 +26,15 @@ from vk_bot.ui import (
     CHAT_BTN_NEXT,
     CHAT_BTN_REPORT,
     CHAT_BTN_STOP,
+    COMMUNITY_GREETING,
     MENU_BTN_SEARCH,
-    WELCOME_TEXT,
     build_chat_keyboard,
     build_main_keyboard,
     menu_message,
-    menu_text,
     new_random_id,
 )
 
-_SEARCH_BUTTONS = {MENU_BTN_SEARCH, "🔍 Поиск", CHAT_BTN_NEXT}
+_SEARCH_BUTTONS = {MENU_BTN_SEARCH, "🔍 Поиск", CHAT_BTN_NEXT, "Начать"}
 _PARTNER_LEFT = "Собеседник завершил диалог. Нажми «Найти собеседника», чтобы найти нового."
 
 
@@ -91,13 +89,10 @@ async def _notify_left(partner: Peer) -> None:
 
 
 async def handle_start(peer: Peer, text: str, payload: dict, vk_message: Message | None) -> bool:
-    """Сбрасывает текущий диалог и открывает меню."""
+    """Кнопка «Начать» ставит человека в поиск собеседника."""
     if not _is_start(text, payload):
         return False
-    partner = stop_chat(peer)
-    await _reply(peer, f"{WELCOME_TEXT}\n\n{menu_text()}", "main", vk_message, photo=WELCOME_IMAGE)
-    if partner is not None:
-        await _notify_left(partner)
+    await connect_with_partner(peer, vk_message)
     return True
 
 
@@ -183,7 +178,7 @@ async def handle_menu_or_dialog(peer: Peer, text: str, vk_message: Message | Non
     if searching:
         return
 
-    await _reply(peer, menu_message(), "main", vk_message)
+    await _reply(peer, COMMUNITY_GREETING, "main", vk_message)
 
 
 async def handle_incoming(
@@ -203,12 +198,21 @@ def vk_handler(bot_key: str):
     """Обработчик одного сообщества ВК. Ключ нужен, чтобы ответ ушёл тем же токеном."""
 
     async def _handle(message: Message) -> None:
-        await handle_incoming(
-            Peer("vk", bot_key, message.from_id),
-            (message.text or "").strip(),
-            parse_payload(message),
-            message,
-        )
+        if message.from_id is None or message.from_id <= 0:
+            return
+        text = (message.text or "").strip()
+        payload = parse_payload(message)
+        peer = Peer("vk", bot_key, message.from_id)
+        if message.peer_id != message.from_id:
+            await message.answer(
+                COMMUNITY_GREETING,
+                keyboard=build_main_keyboard(),
+                random_id=new_random_id(),
+            )
+            if _is_start(text, payload):
+                await connect_with_partner(peer, None)
+            return
+        await handle_incoming(peer, text, payload, message)
 
     return _handle
 

@@ -5,6 +5,11 @@ import random
 from vkbottle import Keyboard, KeyboardButtonColor, OpenLink, Text
 
 MENU_TEXT = "Найди собеседника прямо сейчас"
+COMMUNITY_GREETING = (
+    "👋 Привет! Это чат для анонимных знакомств, флирта и легкого общения\n"
+    "Найди собеседника прямо сейчас. Нажми кнопку начать"
+)
+START_BTN = "Начать"
 
 
 def menu_text() -> str:
@@ -34,9 +39,9 @@ def menu_message(text: str = "") -> str:
 
 
 def build_main_keyboard() -> str:
-    """Клавиатура меню: только поиск собеседника."""
+    """Клавиатура чата сообщества: кнопка «Начать»."""
     keyboard = Keyboard(one_time=False, inline=False).add(
-        Text(MENU_BTN_SEARCH),
+        Text(START_BTN),
         color=KeyboardButtonColor.POSITIVE,
     )
     return keyboard.get_json()
