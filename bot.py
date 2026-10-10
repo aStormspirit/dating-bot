@@ -7,13 +7,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from vkbottle.bot import Bot
+from vkbottle import GroupEventType
+from vkbottle.bot import Bot, MessageEvent
 from vkbottle.http.aiohttp import AiohttpClient
 
 from vk_bot.chat import adopt_legacy_vk
 from vk_bot.config import tg_tokens, vk_tokens
 from vk_bot.gateway import gateway
-from vk_bot.handlers import answer_waiting, vk_handler
+from vk_bot.handlers import answer_waiting, attach_start_buttons, vk_handler, vk_start_handler
 from vk_bot.longpoll import VersionedBotPolling
 from vk_bot.startup import preflight_check, rebuild_vkbottle_response_models
 
@@ -47,6 +48,7 @@ async def _listen(bot: Bot, group_id: str) -> None:
     print(f"Слушаю сообщения group_id={group_id}", flush=True)
     try:
         await answer_waiting(bot.api, group_id)
+        await attach_start_buttons(bot.api, group_id)
     except Exception as exc:  # noqa: BLE001 — сбой догонки не должен останавливать приём
         print(
             f"Не ответил на ожидающие group_id={group_id}: {type(exc).__name__}: {exc}",
@@ -80,6 +82,7 @@ async def _run() -> None:
         bot = community_bot(token)
         gateway.add_vk(bot_key, bot.api)
         bot.on.message()(vk_handler(bot_key))
+        bot.on.raw_event(GroupEventType.MESSAGE_EVENT, MessageEvent)(vk_start_handler(bot_key))
         task = asyncio.create_task(_listen(bot, bot_key), name=f"vk-{bot_key}")
         task.add_done_callback(_log_task_end)
         tasks.append(task)

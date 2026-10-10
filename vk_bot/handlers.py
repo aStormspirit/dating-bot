@@ -6,7 +6,7 @@ import json
 import time
 from pathlib import Path
 
-from vkbottle.bot import Message
+from vkbottle.bot import Message, MessageEvent
 
 from vk_bot.chat import (
     FOUND_TEXT,
@@ -240,6 +240,48 @@ def vk_handler(bot_key: str):
     return _handle
 
 
+def _event_payload(event: MessageEvent) -> dict:
+    """Достаёт payload нажатой кнопки. VK отдаёт и словарь, и строку JSON."""
+    raw = event.payload
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
+    return {}
+
+
+def vk_start_handler(bot_key: str):
+    """Нажатие inline-кнопки «Начать» в личке или в беседе сообщества."""
+
+    async def _handle(event: MessageEvent) -> None:
+        print(
+            f"VK кнопка group={bot_key} from={event.user_id} peer={event.peer_id}",
+            flush=True,
+        )
+        try:
+            await event.send_empty_answer()
+        except Exception as exc:  # noqa: BLE001 — ответ на нажатие не должен срывать поиск
+            print(f"Не подтвердил нажатие: {type(exc).__name__}: {exc}", flush=True)
+        if _event_payload(event).get("command") != "start":
+            return
+        if event.user_id is None or event.user_id <= 0:
+            return
+        try:
+            await connect_with_partner(Peer("vk", bot_key, event.user_id), None)
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"Ошибка кнопки Начать group={bot_key} from={event.user_id}: "
+                f"{type(exc).__name__}: {exc}",
+                flush=True,
+            )
+
+    return _handle
+
+
 async def answer_waiting(api: object, bot_key: str) -> None:
     """Отвечает на чужие сообщения за последний час, которые бот ещё не закрыл своим ответом."""
     response = await api.request("messages.getConversations", {"count": 20})  # type: ignore[attr-defined]
@@ -282,6 +324,47 @@ async def answer_waiting(api: object, bot_key: str) -> None:
         except Exception as exc:  # noqa: BLE001
             print(f"Не отметил прочитанным peer={peer_id}: {type(exc).__name__}: {exc}", flush=True)
         print(f"Ответил на ожидающее group={bot_key} peer={peer_id}", flush=True)
+
+
+async def attach_start_buttons(api: object, bot_key: str) -> None:
+    """Дописывает кнопку «Начать» к свежим приветствиям, которые ушли без неё."""
+    response = await api.request("messages.getConversations", {"count": 20})  # type: ignore[attr-defined]
+    payload = response
+    if isinstance(payload, dict) and "items" not in payload and isinstance(payload.get("response"), dict):
+        payload = payload["response"]
+    items = payload.get("items") if isinstance(payload, dict) else None
+    if not items:
+        return
+    cutoff = int(time.time()) - 3600
+    for item in items:
+        conversation = item.get("conversation") or {}
+        last = item.get("last_message") or {}
+        peer_id = (conversation.get("peer") or {}).get("id")
+        text = last.get("text") or ""
+        if not peer_id or int(last.get("out") or 0) != 1 or "Нажми кнопку начать" not in text:
+            continue
+        if int(last.get("date") or 0) < cutoff:
+            continue
+        edit: dict = {
+            "peer_id": peer_id,
+            "message": text,
+            "keyboard": build_main_keyboard(),
+        }
+        if last.get("conversation_message_id"):
+            edit["conversation_message_id"] = last["conversation_message_id"]
+        elif last.get("id"):
+            edit["message_id"] = last["id"]
+        else:
+            continue
+        try:
+            await api.messages.edit(**edit)  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"Не добавил кнопку group={bot_key} peer={peer_id}: {type(exc).__name__}: {exc}",
+                flush=True,
+            )
+            continue
+        print(f"Добавил кнопку Начать group={bot_key} peer={peer_id}", flush=True)
 
 
 async def connect_with_partner(peer: Peer, vk_message: Message | None) -> None:

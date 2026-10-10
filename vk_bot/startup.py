@@ -93,6 +93,7 @@ def ensure_incoming_events(token: str, group_id: int) -> None:
     events = dict(body.get("events") or {})
     was = 1 if events.get("message_new") else 0
     events["message_new"] = 1
+    events["message_event"] = 1
     params: dict = {
         "access_token": token,
         "group_id": group_id,

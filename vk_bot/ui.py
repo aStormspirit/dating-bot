@@ -1,8 +1,9 @@
 """Тексты, подписи кнопок и клавиатуры сообщений."""
 
+import json
 import random
 
-from vkbottle import Keyboard, KeyboardButtonColor, OpenLink, Text
+from vkbottle import Callback, Keyboard, KeyboardButtonColor, OpenLink, Text
 
 MENU_TEXT = "Найди собеседника прямо сейчас"
 COMMUNITY_GREETING = (
@@ -39,9 +40,9 @@ def menu_message(text: str = "") -> str:
 
 
 def build_main_keyboard() -> str:
-    """Клавиатура чата сообщества: кнопка «Начать»."""
-    keyboard = Keyboard(one_time=False, inline=False).add(
-        Text(START_BTN),
+    """Кнопка «Начать» под текстом. В беседе обычная клавиатура не показывается."""
+    keyboard = Keyboard(inline=True).add(
+        Callback(START_BTN, payload=json.dumps({"command": "start"})),
         color=KeyboardButtonColor.POSITIVE,
     )
     return keyboard.get_json()
