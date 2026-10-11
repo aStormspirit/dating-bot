@@ -9,13 +9,12 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from redis.asyncio import Redis
 
 from app.config import get_settings
 from app.db import create_pool, ensure_schema
 from app.events import REDIS_SOCKET_TIMEOUT, EventBus, WebSocketHub
-from app.routers import me, peers, ws
+from app.routers import peers, ws
 from app.services.chat import ChatService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -50,19 +49,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await pool.close()
 
 
-app = FastAPI(title="Chat API", version="1.0.0", lifespan=lifespan)
-
-_origins = get_settings().cors_origin_list
-if _origins:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=_origins,
-        allow_methods=["GET", "POST"],
-        allow_headers=["Authorization", "Content-Type"],
-    )
+app = FastAPI(title="Chat API", version="1.1.0", lifespan=lifespan)
 
 app.include_router(peers.router, prefix="/api/v1")
-app.include_router(me.router, prefix="/api/v1")
 app.include_router(ws.router, prefix="/api/v1")
 
 

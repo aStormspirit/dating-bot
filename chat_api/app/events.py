@@ -1,7 +1,8 @@
 """События для второй стороны диалога через Redis Streams.
 
 Поток на платформу: `chat:events:vk`, `chat:events:tg`, `chat:events:web`.
-Боты читают свои потоки группой потребителей, поток сайта читает сам API и раздаёт по WebSocket.
+Боты читают свои потоки группой потребителей, поток сайта читает сам API
+и отдаёт серверному приложению по WebSocket.
 """
 
 from __future__ import annotations
@@ -9,12 +10,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections import defaultdict
 
 from fastapi import WebSocket
 from redis.asyncio import Redis
 
-from app.peer import WEB_BOT_KEY, Peer
+from app.peer import Peer
 from app.schemas import ChatEvent
 
 logger = logging.getLogger(__name__)
@@ -50,22 +50,17 @@ class EventBus:
 
 
 class WebSocketHub:
-    """Держит WebSocket-соединения гостей этой копии API и отдаёт им события из потока сайта."""
+    """Держит WebSocket-соединения приложения сайта с этой копией API и отдаёт им события web."""
 
     def __init__(self, redis: Redis) -> None:
         self._redis = redis
-        self._sockets: dict[int, set[WebSocket]] = defaultdict(set)
+        self._sockets: set[WebSocket] = set()
 
-    def add(self, guest_id: int, socket: WebSocket) -> None:
-        self._sockets[guest_id].add(socket)
+    def add(self, socket: WebSocket) -> None:
+        self._sockets.add(socket)
 
-    def remove(self, guest_id: int, socket: WebSocket) -> None:
-        sockets = self._sockets.get(guest_id)
-        if not sockets:
-            return
-        sockets.discard(socket)
-        if not sockets:
-            del self._sockets[guest_id]
+    def remove(self, socket: WebSocket) -> None:
+        self._sockets.discard(socket)
 
     async def run(self) -> None:
         """Читает поток сайта с текущего конца. Каждая копия API видит все события."""
@@ -91,15 +86,11 @@ class WebSocketHub:
             return
         try:
             body = json.loads(raw)
-            to = body.pop("to")
-            if to.get("bot_key") != WEB_BOT_KEY:
-                return
-            guest_id = int(to["user_id"])
-        except (ValueError, KeyError, TypeError, AttributeError):
+        except ValueError:
             logger.warning("Битое событие в потоке сайта: %r", raw)
             return
-        for socket in list(self._sockets.get(guest_id, ())):
+        for socket in list(self._sockets):
             try:
                 await socket.send_json(body)
             except Exception:  # noqa: BLE001 — закрытое соединение снимется в обработчике WebSocket
-                self.remove(guest_id, socket)
+                self.remove(socket)

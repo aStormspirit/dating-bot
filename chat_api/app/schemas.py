@@ -28,11 +28,6 @@ class MessageOut(BaseModel):
     phase: Phase
 
 
-class GuestOut(BaseModel):
-    token: str
-    guest_id: int
-
-
 class ChatEvent(BaseModel):
     """Событие для второй стороны. Инициатор узнаёт итог из HTTP-ответа."""
 

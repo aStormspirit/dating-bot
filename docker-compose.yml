@@ -2,6 +2,7 @@
 # Локально: docker compose up --build
 # На сервере CI подставляет BOT_IMAGE, CHAT_API_IMAGE и PREMIUM_IMAGE из Docker Hub, сборки нет.
 # Chat API: http://127.0.0.1:8000/docs
+# На сервере Studio и Chat API открыты наружу только через cloudflared (профиль proxy).
 # Studio: http://127.0.0.1:54323
 
 services:
@@ -63,8 +64,7 @@ services:
       DATABASE_URL: postgresql://supabase_admin:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}
       REDIS_URL: redis://redis:6379/0
       CHAT_API_SERVICE_TOKEN: ${CHAT_API_SERVICE_TOKEN:?Задайте CHAT_API_SERVICE_TOKEN в .env}
-      GUEST_JWT_SECRET: ${GUEST_JWT_SECRET:?Задайте GUEST_JWT_SECRET в .env}
-      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      CHAT_API_APP_TOKEN: ${CHAT_API_APP_TOKEN:?Задайте CHAT_API_APP_TOKEN в .env}
     depends_on:
       db:
         condition: service_healthy
@@ -159,14 +159,24 @@ services:
       - "443:443/udp"
     environment:
       PAY_HOST: ${PAY_HOST:-pay.chatwithyou.site}
-      STUDIO_HOST: ${STUDIO_HOST:-studio.chatwithyou.site}
-      API_HOST: ${API_HOST:-api.chatwithyou.site}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
       - premium
+
+  # Studio и Chat API доступны снаружи только через Cloudflare Tunnel под Cloudflare Access.
+  # Адреса и правила входа настроены в Cloudflare, контейнеру нужен только токен туннеля.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.0
+    container_name: vk-bot-cloudflared
+    profiles: ["proxy"]
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
       - studio
       - chat-api
 

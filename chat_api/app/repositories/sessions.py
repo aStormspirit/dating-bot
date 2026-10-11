@@ -141,9 +141,3 @@ async def record_search(conn: AsyncConnection, peer: Peer) -> None:
         """,
         _key(peer),
     )
-
-
-async def next_guest_id(conn: AsyncConnection) -> int:
-    cursor = await conn.execute("SELECT nextval('web_guest_id_seq') AS id")
-    row = await cursor.fetchone()
-    return int(row["id"])

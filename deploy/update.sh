@@ -131,21 +131,38 @@ ensure_secret() {
   set_env "$key" "$value"
 }
 
-ensure_secret CHAT_API_SERVICE_TOKEN
-ensure_secret GUEST_JWT_SECRET
+# Ключ, который знает не только сервер: из секрета ENV_FILE или из .env. Без него деплой останавливается.
+require_secret() {
+  key=$1
+  value=$(secret_value "$key")
+  if [ -z "$value" ]; then
+    value=$(sed -n "s/^${key}=//p" .env | tail -n 1)
+  fi
+  if [ -z "$value" ]; then
+    echo "Добавьте ${key} в секрет ENV_FILE." >&2
+    exit 1
+  fi
+  set_env "$key" "$value"
+}
 
-cors=$(secret_value CORS_ORIGINS)
-if [ -n "$cors" ]; then
-  set_env CORS_ORIGINS "$cors"
-fi
+drop_env() {
+  tmp=$(mktemp)
+  grep -v "^$1=" .env > "$tmp" || true
+  mv "$tmp" .env
+  chmod 600 .env
+}
+
+ensure_secret CHAT_API_SERVICE_TOKEN
+require_secret CHAT_API_APP_TOKEN
+require_secret CLOUDFLARE_TUNNEL_TOKEN
+for stale in GUEST_JWT_SECRET CORS_ORIGINS STUDIO_HOST API_HOST; do
+  drop_env "$stale"
+done
 
 PAY_HOST="${PAY_HOST:-pay.chatwithyou.site}"
 STUDIO_HOST="${STUDIO_HOST:-studio.chatwithyou.site}"
-API_HOST="${API_HOST:-api.chatwithyou.site}"
 
 set_env PAY_HOST "$PAY_HOST"
-set_env STUDIO_HOST "$STUDIO_HOST"
-set_env API_HOST "$API_HOST"
 set_env PREMIUM_URL "https://vk.cc/d2HjY8"
 set_env STUDIO_PUBLIC_URL "https://${STUDIO_HOST}"
 set_env PREMIUM_PUBLISH "127.0.0.1:8080"
@@ -175,9 +192,10 @@ docker logout >/dev/null 2>&1 || true
 docker compose --profile proxy up -d --no-build --remove-orphans db redis
 docker compose --profile proxy up -d --no-build --remove-orphans --force-recreate chat-api premium
 docker compose --profile proxy up -d --no-build --remove-orphans --force-recreate bot
-docker compose --profile proxy up -d --no-build caddy
+docker compose --profile proxy up -d --no-build caddy cloudflared
 docker restart vk-bot-caddy
 sleep 12
+docker logs vk-bot-cloudflared --tail 20 2>&1 | grep -E "Registered tunnel connection|ERR|error" || true
 docker logs vk-chat-api --tail 40 2>&1 | grep -E "Схема базы|Application startup|ERROR|Traceback" || true
 docker logs vk-bot --tail 80 2>&1 | grep -E "Токенов ВК|VK:|Telegram:|Chat API|События|пропущен|OK:|Нет права|Нет доступа|Токен невалиден|Бот запущен|Ошибка запуска|VK Error|Traceback" || true
 sleep 8

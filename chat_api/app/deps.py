@@ -1,21 +1,25 @@
-"""Зависимости маршрутов: сервис чата и адресат запроса."""
+"""Зависимости маршрутов: сервис чата, клиент API и адресат запроса."""
 
 from __future__ import annotations
 
 import hmac
-from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
-import jwt
 from fastapi import Depends, HTTPException, Path, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import Settings, get_settings
-from app.peer import WEB_BOT_KEY, Peer
+from app.peer import Peer
 from app.services.chat import ChatService
 
+Client = Literal["bot", "app"]
+# Бот ВК и Telegram не может действовать от имени пользователей сайта и наоборот.
+CLIENT_PLATFORMS: dict[Client, frozenset[str]] = {
+    "bot": frozenset({"vk", "tg"}),
+    "app": frozenset({"web"}),
+}
+
 _bearer = HTTPBearer(auto_error=False)
-_GUEST_AUDIENCE = "chat-guest"
 
 
 def get_chat(request: Request) -> ChatService:
@@ -27,59 +31,45 @@ Credentials = Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)]
 AppSettings = Annotated[Settings, Depends(get_settings)]
 
 
-def _unauthorized() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Нужен действующий токен",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+def _matches(token: str, expected: str) -> bool:
+    return hmac.compare_digest(token.encode(), expected.encode())
+
+
+def identify_client(token: str | None, settings: Settings) -> Client | None:
+    """Определяет клиента по токену. None, если токен не подходит."""
+    if not token:
+        return None
+    if _matches(token, settings.chat_api_service_token):
+        return "bot"
+    if _matches(token, settings.chat_api_app_token):
+        return "app"
+    return None
+
+
+def current_client(credentials: Credentials, settings: AppSettings) -> Client:
+    client = identify_client(credentials.credentials if credentials else None, settings)
+    if client is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Нужен действующий токен",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return client
+
+
+CurrentClient = Annotated[Client, Depends(current_client)]
 
 
 def service_peer(
-    platform: Annotated[Literal["vk", "tg"], Path()],
+    platform: Annotated[Literal["vk", "tg", "web"], Path()],
     bot_key: Annotated[str, Path(min_length=1, max_length=64)],
     user_id: Annotated[int, Path(gt=0)],
-    credentials: Credentials,
-    settings: AppSettings,
+    client: CurrentClient,
 ) -> Peer:
-    """Бот действует от имени любого своего пользователя по сервисному токену."""
-    if credentials is None or not hmac.compare_digest(
-        credentials.credentials.encode(), settings.chat_api_service_token.encode()
-    ):
-        raise _unauthorized()
+    """Клиент действует от имени пользователя только своей платформы."""
+    if platform not in CLIENT_PLATFORMS[client]:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, f"Токену недоступна платформа {platform}")
     return Peer(platform, bot_key, user_id)
 
 
-def issue_guest_token(guest_id: int, settings: Settings) -> str:
-    now = datetime.now(UTC)
-    payload = {
-        "sub": str(guest_id),
-        "aud": _GUEST_AUDIENCE,
-        "iat": now,
-        "exp": now + timedelta(days=settings.guest_token_days),
-    }
-    return jwt.encode(payload, settings.guest_jwt_secret, algorithm="HS256")
-
-
-def decode_guest_token(token: str, settings: Settings) -> Peer:
-    try:
-        payload = jwt.decode(
-            token,
-            settings.guest_jwt_secret,
-            algorithms=["HS256"],
-            audience=_GUEST_AUDIENCE,
-        )
-        guest_id = int(payload["sub"])
-    except (jwt.PyJWTError, KeyError, ValueError) as exc:
-        raise _unauthorized() from exc
-    return Peer("web", WEB_BOT_KEY, guest_id)
-
-
-def guest_peer(credentials: Credentials, settings: AppSettings) -> Peer:
-    if credentials is None:
-        raise _unauthorized()
-    return decode_guest_token(credentials.credentials, settings)
-
-
 ServicePeer = Annotated[Peer, Depends(service_peer)]
-GuestPeer = Annotated[Peer, Depends(guest_peer)]
