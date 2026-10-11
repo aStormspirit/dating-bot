@@ -131,10 +131,14 @@ ensure_secret() {
   set_env "$key" "$value"
 }
 
-# Ключ, который знает не только сервер: из секрета ENV_FILE или из .env. Без него деплой останавливается.
+# Ключ, который знает не только сервер: из отдельного секрета GitHub, из ENV_FILE или из .env.
+# Без него деплой останавливается.
 require_secret() {
   key=$1
-  value=$(secret_value "$key")
+  eval "value=\${$key:-}"
+  if [ -z "$value" ]; then
+    value=$(secret_value "$key")
+  fi
   if [ -z "$value" ]; then
     value=$(sed -n "s/^${key}=//p" .env | tail -n 1)
   fi
