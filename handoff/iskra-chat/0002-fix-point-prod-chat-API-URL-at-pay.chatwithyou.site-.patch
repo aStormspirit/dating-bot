@@ -1,0 +1,41 @@
+From 7e6d613c0d23c8068692e5ab03c3a6fb76eb610a Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Sun, 11 Oct 2026 16:03:29 +0000
+Subject: [PATCH 2/2] fix: point prod chat API URL at pay.chatwithyou.site
+ gateway
+
+api.* is behind Cloudflare Access; pay.* already reaches Caddy which
+proxies /api/v1/* to web-gateway.
+---
+ .env.example                | 2 +-
+ .github/workflows/pages.yml | 3 ++-
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/.env.example b/.env.example
+index fb0318f..2d5400b 100644
+--- a/.env.example
++++ b/.env.example
+@@ -6,5 +6,5 @@ NEXT_PUBLIC_BASE_PATH=
+ 
+ # Public web-gateway base URL (dating-bot). No secrets — APP token stays on gateway.
+ # Local: http://127.0.0.1:8001
+-# Prod: https://api.chatwithyou.site
++# Prod: https://pay.chatwithyou.site  (Caddy proxies /api/v1/* → web-gateway)
+ NEXT_PUBLIC_CHAT_API_URL=http://127.0.0.1:8001
+diff --git a/.github/workflows/pages.yml b/.github/workflows/pages.yml
+index 7037485..a72877b 100644
+--- a/.github/workflows/pages.yml
++++ b/.github/workflows/pages.yml
+@@ -51,7 +51,8 @@ jobs:
+           if [[ -n "$CHAT_API_URL" ]]; then
+             echo "NEXT_PUBLIC_CHAT_API_URL=${CHAT_API_URL}" >> "$GITHUB_ENV"
+           else
+-            echo "NEXT_PUBLIC_CHAT_API_URL=https://api.chatwithyou.site" >> "$GITHUB_ENV"
++            # pay.* already points at the VPS Caddy; /api/v1/* → web-gateway.
++            echo "NEXT_PUBLIC_CHAT_API_URL=https://pay.chatwithyou.site" >> "$GITHUB_ENV"
+           fi
+ 
+       - name: Build
+-- 
+2.43.0
+

@@ -1,0 +1,1032 @@
+From 85572bbba0af94a209b591ff8621342c19a658c1 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Sun, 11 Oct 2026 15:56:38 +0000
+Subject: [PATCH 1/2] feat: add /chat page wired to dating-bot web gateway
+
+Browser chat uses guest JWT against the public gateway (search, messages,
+statuses, leave). NEXT_PUBLIC_CHAT_API_URL points at the gateway; APP token
+never ships in the static site.
+---
+ .env.example                |   5 +
+ .github/workflows/pages.yml |  18 +-
+ app/chat/page.tsx           |  29 +++
+ app/globals.css             | 206 ++++++++++++++++++++
+ app/sitemap.ts              |   8 +-
+ components/chat-room.tsx    | 363 ++++++++++++++++++++++++++++++++++++
+ components/footer.tsx       |  13 +-
+ components/header.tsx       |  34 ++--
+ components/logo.tsx         |   5 +-
+ lib/chat-api.ts             | 191 +++++++++++++++++++
+ 10 files changed, 848 insertions(+), 24 deletions(-)
+ create mode 100644 app/chat/page.tsx
+ create mode 100644 components/chat-room.tsx
+ create mode 100644 lib/chat-api.ts
+
+diff --git a/.env.example b/.env.example
+index b32c1d5..fb0318f 100644
+--- a/.env.example
++++ b/.env.example
+@@ -3,3 +3,8 @@ NEXT_PUBLIC_SITE_URL=https://example.com
+ 
+ # Path prefix for GitHub project pages, for example /iskra. Leave empty locally.
+ NEXT_PUBLIC_BASE_PATH=
++
++# Public web-gateway base URL (dating-bot). No secrets — APP token stays on gateway.
++# Local: http://127.0.0.1:8001
++# Prod: https://api.chatwithyou.site
++NEXT_PUBLIC_CHAT_API_URL=http://127.0.0.1:8001
+diff --git a/.github/workflows/pages.yml b/.github/workflows/pages.yml
+index 4ac6da3..7037485 100644
+--- a/.github/workflows/pages.yml
++++ b/.github/workflows/pages.yml
+@@ -31,15 +31,27 @@ jobs:
+         run: npm ci
+ 
+       - name: Set site URL
++        env:
++          CHAT_API_URL: ${{ secrets.NEXT_PUBLIC_CHAT_API_URL }}
++          CUSTOM_SITE_URL: ${{ secrets.NEXT_PUBLIC_SITE_URL }}
+         run: |
+           owner=$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+           name="${{ github.event.repository.name }}"
+-          if [[ "$name" == *.github.io ]]; then
++          if [[ -n "$CUSTOM_SITE_URL" ]]; then
++            echo "NEXT_PUBLIC_BASE_PATH=" >> "$GITHUB_ENV"
++            echo "NEXT_PUBLIC_SITE_URL=${CUSTOM_SITE_URL}" >> "$GITHUB_ENV"
++          elif [[ "$name" == *.github.io ]]; then
+             echo "NEXT_PUBLIC_BASE_PATH=" >> "$GITHUB_ENV"
+             echo "NEXT_PUBLIC_SITE_URL=https://${owner}.github.io" >> "$GITHUB_ENV"
+           else
+-            echo "NEXT_PUBLIC_BASE_PATH=/${name}" >> "$GITHUB_ENV"
+-            echo "NEXT_PUBLIC_SITE_URL=https://${owner}.github.io/${name}" >> "$GITHUB_ENV"
++            # Custom domain chatwithyou.site is the intended prod host.
++            echo "NEXT_PUBLIC_BASE_PATH=" >> "$GITHUB_ENV"
++            echo "NEXT_PUBLIC_SITE_URL=https://chatwithyou.site" >> "$GITHUB_ENV"
++          fi
++          if [[ -n "$CHAT_API_URL" ]]; then
++            echo "NEXT_PUBLIC_CHAT_API_URL=${CHAT_API_URL}" >> "$GITHUB_ENV"
++          else
++            echo "NEXT_PUBLIC_CHAT_API_URL=https://api.chatwithyou.site" >> "$GITHUB_ENV"
+           fi
+ 
+       - name: Build
+diff --git a/app/chat/page.tsx b/app/chat/page.tsx
+new file mode 100644
+index 0000000..f0e263f
+--- /dev/null
++++ b/app/chat/page.tsx
+@@ -0,0 +1,29 @@
++import type { Metadata } from "next";
++import { Header } from "@/components/header";
++import { Footer } from "@/components/footer";
++import { ChatRoom } from "@/components/chat-room";
++import { siteName } from "@/lib/site";
++
++export const metadata: Metadata = {
++  title: "Чат",
++  description: `Анонимный чат ${siteName} в браузере — общая очередь с VK и Telegram.`,
++  alternates: {
++    canonical: "/chat/",
++  },
++  openGraph: {
++    url: "/chat/",
++    title: `Чат — ${siteName}`,
++  },
++};
++
++export default function ChatPage() {
++  return (
++    <>
++      <Header />
++      <main id="main" className="chat-main">
++        <ChatRoom />
++      </main>
++      <Footer />
++    </>
++  );
++}
+diff --git a/app/globals.css b/app/globals.css
+index f4fb15f..5dec647 100644
+--- a/app/globals.css
++++ b/app/globals.css
+@@ -982,6 +982,212 @@
+     }
+   }
+ 
++  .visually-hidden {
++    position: absolute;
++    width: 1px;
++    height: 1px;
++    padding: 0;
++    margin: -1px;
++    overflow: hidden;
++    clip: rect(0, 0, 0, 0);
++    white-space: nowrap;
++    border: 0;
++  }
++
++  .btn-ghost {
++    background: transparent;
++    color: var(--ink);
++    box-shadow: inset 0 0 0 1px var(--line);
++  }
++
++  .chat-main {
++    min-height: 100vh;
++    background:
++      radial-gradient(circle at 12% 18%, rgba(255, 116, 32, 0.18), transparent 36%),
++      radial-gradient(circle at 88% 8%, rgba(214, 255, 74, 0.22), transparent 28%),
++      linear-gradient(180deg, #fff3e4 0%, var(--cream) 42%, #fff 100%);
++  }
++
++  .chat-shell {
++    width: min(44rem, calc(100% - 2rem));
++    margin: 0 auto;
++    padding:
++      calc(6.5rem + env(safe-area-inset-top))
++      0
++      max(2rem, env(safe-area-inset-bottom));
++  }
++
++  .chat-card {
++    background: rgba(255, 255, 255, 0.88);
++    border: 1px solid var(--line);
++    border-radius: 1.75rem;
++    padding: clamp(1.1rem, 3vw, 1.6rem);
++    box-shadow: var(--shadow);
++    display: grid;
++    gap: 1rem;
++    min-height: min(38rem, calc(100vh - 9rem));
++  }
++
++  .chat-head {
++    display: flex;
++    flex-wrap: wrap;
++    justify-content: space-between;
++    gap: 0.75rem;
++    align-items: end;
++  }
++
++  .chat-kicker {
++    font-weight: 800;
++    color: var(--orange);
++    letter-spacing: 0.04em;
++    text-transform: uppercase;
++    font-size: 0.8rem;
++    margin-bottom: 0.2rem;
++  }
++
++  .chat-head h1 {
++    font-size: var(--text-xl);
++  }
++
++  .chat-lead {
++    color: var(--muted);
++  }
++
++  .chat-lead code {
++    font-size: 0.9em;
++    background: #fff;
++    border: 1px solid var(--line);
++    border-radius: 0.4rem;
++    padding: 0.05rem 0.35rem;
++  }
++
++  .chat-meta {
++    display: inline-flex;
++    align-items: center;
++    gap: 0.45rem;
++    color: var(--muted);
++    font-weight: 700;
++    font-size: 0.92rem;
++  }
++
++  .chat-dot {
++    width: 0.65rem;
++    height: 0.65rem;
++    border-radius: 999px;
++    background: #c4b8a8;
++  }
++
++  .chat-dot-open {
++    background: #2fbe63;
++  }
++
++  .chat-dot-connecting {
++    background: #ffb020;
++    animation: chat-pulse 1.2s ease-in-out infinite;
++  }
++
++  .chat-dot-closed {
++    background: #d14343;
++  }
++
++  .chat-error {
++    color: #9b1c1c;
++    background: #ffe8e5;
++    border-radius: 0.85rem;
++    padding: 0.7rem 0.9rem;
++    font-weight: 600;
++  }
++
++  .chat-messages {
++    min-height: 16rem;
++    max-height: min(28rem, 48vh);
++    overflow: auto;
++    display: grid;
++    gap: 0.55rem;
++    align-content: start;
++    padding: 0.85rem;
++    border-radius: 1.15rem;
++    background:
++      linear-gradient(180deg, rgba(255, 248, 239, 0.95), #fff),
++      #fff;
++    border: 1px solid var(--line);
++  }
++
++  .chat-empty,
++  .chat-waiting {
++    color: var(--muted);
++    margin: 0;
++  }
++
++  .chat-bubble {
++    max-width: min(34rem, 92%);
++    padding: 0.7rem 0.9rem;
++    border-radius: 1rem;
++    line-height: 1.4;
++    white-space: pre-wrap;
++  }
++
++  .chat-bubble-me {
++    justify-self: end;
++    background: var(--orange);
++    color: #fff;
++    border-bottom-right-radius: 0.35rem;
++  }
++
++  .chat-bubble-partner {
++    justify-self: start;
++    background: var(--ink);
++    color: #fff;
++    border-bottom-left-radius: 0.35rem;
++  }
++
++  .chat-bubble-system {
++    justify-self: center;
++    background: transparent;
++    color: var(--muted);
++    font-size: 0.92rem;
++    font-weight: 600;
++    text-align: center;
++  }
++
++  .chat-actions {
++    display: flex;
++    flex-wrap: wrap;
++    gap: 0.55rem;
++    align-items: center;
++  }
++
++  .chat-composer {
++    display: grid;
++    grid-template-columns: minmax(0, 1fr) auto;
++    gap: 0.55rem;
++  }
++
++  .chat-composer input {
++    min-height: 2.75rem;
++    border: 1px solid var(--line);
++    border-radius: 999px;
++    padding: 0.7rem 1rem;
++    font: inherit;
++    background: #fff;
++    color: var(--ink);
++  }
++
++  .chat-composer input:disabled {
++    background: #f7f1e8;
++    color: var(--muted);
++  }
++
++  @keyframes chat-pulse {
++    0%,
++    100% {
++      opacity: 1;
++    }
++    50% {
++      opacity: 0.35;
++    }
++  }
++
+   @media (prefers-reduced-motion: reduce) {
+     html {
+       scroll-behavior: auto;
+diff --git a/app/sitemap.ts b/app/sitemap.ts
+index c1a83f7..db88eb5 100644
+--- a/app/sitemap.ts
++++ b/app/sitemap.ts
+@@ -7,9 +7,15 @@ export default function sitemap(): MetadataRoute.Sitemap {
+   return [
+     {
+       url: siteUrl,
+-      lastModified: "2026-10-07",
++      lastModified: "2026-10-11",
+       changeFrequency: "monthly",
+       priority: 1,
+     },
++    {
++      url: `${siteUrl}/chat/`,
++      lastModified: "2026-10-11",
++      changeFrequency: "weekly",
++      priority: 0.8,
++    },
+   ];
+ }
+diff --git a/components/chat-room.tsx b/components/chat-room.tsx
+new file mode 100644
+index 0000000..78b1ae9
+--- /dev/null
++++ b/components/chat-room.tsx
+@@ -0,0 +1,363 @@
++"use client";
++
++import { useEffect, useRef, useState, type FormEvent } from "react";
++import {
++  chatApiConfigured,
++  clearStoredGuest,
++  ensureGuest,
++  getState,
++  openEvents,
++  reportAndSearch,
++  sendMessage,
++  startSearch,
++  stopChat,
++  type ChatEvent,
++  type Phase,
++} from "@/lib/chat-api";
++
++type UiMessage = {
++  id: string;
++  role: "me" | "partner" | "system";
++  text: string;
++};
++
++const phaseLabel: Record<Phase, string> = {
++  idle: "Готов к поиску",
++  searching: "Ищем собеседника…",
++  chatting: "Диалог",
++};
++
++function nextId(): string {
++  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
++}
++
++export function ChatRoom() {
++  const configured = chatApiConfigured();
++  const [sessionTick, setSessionTick] = useState(0);
++  const [ready, setReady] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++  const [phase, setPhase] = useState<Phase>("idle");
++  const [wsStatus, setWsStatus] = useState<"connecting" | "open" | "closed">(
++    "closed",
++  );
++  const [messages, setMessages] = useState<UiMessage[]>([]);
++  const [draft, setDraft] = useState("");
++  const [busy, setBusy] = useState(false);
++  const tokenRef = useRef<string | null>(null);
++  const listRef = useRef<HTMLDivElement | null>(null);
++
++  const pushSystem = (text: string) => {
++    setMessages((prev) => [...prev, { id: nextId(), role: "system", text }]);
++  };
++
++  useEffect(() => {
++    if (!configured) return;
++    let cancelled = false;
++    let closeWs: (() => void) | undefined;
++
++    const onEvent = (event: ChatEvent) => {
++      if (event.type === "partner_found") {
++        setPhase("chatting");
++        setMessages((prev) => [
++          ...prev,
++          {
++            id: nextId(),
++            role: "system",
++            text: "Собеседник найден. Можете писать.",
++          },
++        ]);
++        return;
++      }
++      if (event.type === "message") {
++        setPhase("chatting");
++        setMessages((prev) => [
++          ...prev,
++          { id: nextId(), role: "partner", text: event.text },
++        ]);
++        return;
++      }
++      if (event.type === "partner_left") {
++        setPhase("idle");
++        const reason =
++          event.reason === "reported"
++            ? "Собеседник пожаловался. Диалог завершён."
++            : event.reason === "undeliverable"
++              ? "Собеседник недоступен. Диалог завершён."
++              : "Собеседник вышел из чата.";
++        setMessages((prev) => [
++          ...prev,
++          { id: nextId(), role: "system", text: reason },
++        ]);
++      }
++    };
++
++    (async () => {
++      try {
++        const guest = await ensureGuest();
++        if (cancelled) return;
++        tokenRef.current = guest.token;
++        const current = await getState(guest.token);
++        if (cancelled) return;
++        setPhase(current);
++        if (current === "searching") {
++          pushSystem("Поиск уже идёт. Ждём собеседника.");
++        } else if (current === "chatting") {
++          pushSystem("Диалог восстановлен. Можно писать.");
++        }
++        closeWs = openEvents(guest.token, onEvent, setWsStatus);
++        setReady(true);
++      } catch (err) {
++        if (!cancelled) {
++          setError(
++            err instanceof Error
++              ? err.message
++              : "Не удалось подключиться к чату",
++          );
++        }
++      }
++    })();
++
++    return () => {
++      cancelled = true;
++      closeWs?.();
++    };
++  }, [configured, sessionTick]);
++
++  useEffect(() => {
++    const node = listRef.current;
++    if (!node) return;
++    node.scrollTop = node.scrollHeight;
++  }, [messages, phase]);
++
++  async function withToken<T>(
++    fn: (token: string) => Promise<T>,
++  ): Promise<T | undefined> {
++    const token = tokenRef.current;
++    if (!token) {
++      setError("Сессия не готова");
++      return undefined;
++    }
++    setBusy(true);
++    setError(null);
++    try {
++      return await fn(token);
++    } catch (err) {
++      setError(err instanceof Error ? err.message : "Ошибка запроса");
++      return undefined;
++    } finally {
++      setBusy(false);
++    }
++  }
++
++  async function handleSearch() {
++    const phaseNext = await withToken(startSearch);
++    if (!phaseNext) return;
++    setPhase(phaseNext);
++    pushSystem(
++      phaseNext === "chatting"
++        ? "Собеседник найден сразу. Можете писать."
++        : "Ищем собеседника…",
++    );
++  }
++
++  async function handleStop() {
++    const result = await withToken(stopChat);
++    if (!result) return;
++    setPhase("idle");
++    pushSystem(result.wasActive ? "Вы вышли из чата." : "Поиск остановлен.");
++  }
++
++  async function handleNext() {
++    const phaseNext = await withToken(startSearch);
++    if (!phaseNext) return;
++    setPhase(phaseNext);
++    pushSystem(
++      phaseNext === "chatting"
++        ? "Новый собеседник найден."
++        : "Ищем следующего собеседника…",
++    );
++  }
++
++  async function handleReport() {
++    const phaseNext = await withToken(reportAndSearch);
++    if (!phaseNext) return;
++    setPhase(phaseNext);
++    pushSystem(
++      phaseNext === "chatting"
++        ? "Жалоба отправлена. Новый собеседник найден."
++        : "Жалоба отправлена. Ищем другого…",
++    );
++  }
++
++  async function handleSend(event: FormEvent) {
++    event.preventDefault();
++    const text = draft.trim();
++    if (!text || phase !== "chatting") return;
++    setDraft("");
++    setMessages((prev) => [...prev, { id: nextId(), role: "me", text }]);
++    const result = await withToken((token) => sendMessage(token, text));
++    if (!result) return;
++    if (!result.delivered || result.phase !== "chatting") {
++      setPhase("idle");
++      pushSystem("Сообщение не доставлено. Диалог завершён.");
++    }
++  }
++
++  async function handleResetSession() {
++    await withToken(stopChat);
++    clearStoredGuest();
++    tokenRef.current = null;
++    setMessages([]);
++    setPhase("idle");
++    setReady(false);
++    setError(null);
++    setSessionTick((value) => value + 1);
++  }
++
++  if (!configured) {
++    return (
++      <section className="chat-shell">
++        <div className="chat-card">
++          <h1>Чат пока недоступен</h1>
++          <p className="chat-lead">
++            Задайте <code>NEXT_PUBLIC_CHAT_API_URL</code> — адрес web-gateway
++            dating-bot (локально обычно <code>http://127.0.0.1:8001</code>).
++          </p>
++        </div>
++      </section>
++    );
++  }
++
++  return (
++    <section className="chat-shell">
++      <div className="chat-card">
++        <header className="chat-head">
++          <div>
++            <p className="chat-kicker">Искра</p>
++            <h1>Анонимный чат</h1>
++          </div>
++          <div className="chat-meta" aria-live="polite">
++            <span className={`chat-dot chat-dot-${wsStatus}`} />
++            <span>
++              {phaseLabel[phase]}
++              {wsStatus !== "open" ? " · соединение…" : ""}
++            </span>
++          </div>
++        </header>
++
++        {!ready && !error ? <p className="chat-lead">Подключаемся…</p> : null}
++        {error ? (
++          <p className="chat-error" role="alert">
++            {error}
++          </p>
++        ) : null}
++
++        <div className="chat-messages" ref={listRef} aria-live="polite">
++          {messages.length === 0 ? (
++            <p className="chat-empty">
++              Нажмите «Найти собеседника», чтобы встать в общую очередь с VK и
++              Telegram.
++            </p>
++          ) : (
++            messages.map((item) => (
++              <div
++                key={item.id}
++                className={`chat-bubble chat-bubble-${item.role}`}
++              >
++                {item.text}
++              </div>
++            ))
++          )}
++        </div>
++
++        <div className="chat-actions">
++          {phase === "idle" ? (
++            <button
++              type="button"
++              className="btn btn-lime"
++              disabled={busy || !ready}
++              onClick={handleSearch}
++            >
++              Найти собеседника
++            </button>
++          ) : null}
++          {phase === "searching" ? (
++            <>
++              <p className="chat-waiting">Ждём в очереди…</p>
++              <button
++                type="button"
++                className="btn btn-dark"
++                disabled={busy}
++                onClick={handleStop}
++              >
++                Отменить поиск
++              </button>
++            </>
++          ) : null}
++          {phase === "chatting" ? (
++            <>
++              <button
++                type="button"
++                className="btn btn-lime"
++                disabled={busy}
++                onClick={handleNext}
++              >
++                Следующий
++              </button>
++              <button
++                type="button"
++                className="btn btn-dark"
++                disabled={busy}
++                onClick={handleStop}
++              >
++                Выйти
++              </button>
++              <button
++                type="button"
++                className="btn btn-ghost"
++                disabled={busy}
++                onClick={handleReport}
++              >
++                Жалоба
++              </button>
++            </>
++          ) : null}
++          <button
++            type="button"
++            className="btn btn-ghost"
++            disabled={busy}
++            onClick={handleResetSession}
++          >
++            Новая сессия
++          </button>
++        </div>
++
++        <form className="chat-composer" onSubmit={handleSend}>
++          <label className="visually-hidden" htmlFor="chat-input">
++            Сообщение
++          </label>
++          <input
++            id="chat-input"
++            value={draft}
++            onChange={(event) => setDraft(event.target.value)}
++            placeholder={
++              phase === "chatting"
++                ? "Напишите сообщение…"
++                : "Сначала найдите собеседника"
++            }
++            disabled={busy || phase !== "chatting"}
++            maxLength={4096}
++            autoComplete="off"
++          />
++          <button
++            type="submit"
++            className="btn btn-lime"
++            disabled={busy || phase !== "chatting" || !draft.trim()}
++          >
++            Отправить
++          </button>
++        </form>
++      </div>
++    </section>
++  );
++}
+diff --git a/components/footer.tsx b/components/footer.tsx
+index 352ea55..39e30cb 100644
+--- a/components/footer.tsx
++++ b/components/footer.tsx
+@@ -13,16 +13,16 @@ export function Footer() {
+           <p className="footer-title">Продукт</p>
+           <ul>
+             <li>
+-              <a href="#features">Возможности</a>
++              <a href="/#features">Возможности</a>
+             </li>
+             <li>
+-              <a href="#how">Как работает</a>
++              <a href="/#how">Как работает</a>
+             </li>
+             <li>
+-              <a href="#premium">Премиум</a>
++              <a href="/#premium">Премиум</a>
+             </li>
+             <li>
+-              <a href="#faq">FAQ</a>
++              <a href="/#faq">FAQ</a>
+             </li>
+           </ul>
+         </div>
+@@ -33,7 +33,10 @@ export function Footer() {
+               <VkLink>Написать боту</VkLink>
+             </li>
+             <li>
+-              <a href="#about">О сервисе</a>
++              <a href="/chat/">Чат на сайте</a>
++            </li>
++            <li>
++              <a href="/#about">О сервисе</a>
+             </li>
+           </ul>
+         </div>
+diff --git a/components/header.tsx b/components/header.tsx
+index a1b0ff9..fe64b67 100644
+--- a/components/header.tsx
++++ b/components/header.tsx
+@@ -1,17 +1,27 @@
+ "use client";
+ 
++import Link from "next/link";
++import { usePathname } from "next/navigation";
+ import { useEffect, useState } from "react";
+-import { VkLink } from "@/components/vk-link";
+ import { Logo } from "@/components/logo";
+ 
+-const links = [
+-  { href: "#features", label: "Возможности" },
+-  { href: "#how", label: "Как работает" },
+-  { href: "#faq", label: "FAQ" },
+-  { href: "#about", label: "О сервисе" },
++const homeLinks = [
++  { href: "/#features", label: "Возможности" },
++  { href: "/#how", label: "Как работает" },
++  { href: "/#faq", label: "FAQ" },
++  { href: "/#about", label: "О сервисе" },
++  { href: "/chat/", label: "Чат" },
++];
++
++const chatLinks = [
++  { href: "/", label: "На главную" },
++  { href: "/chat/", label: "Чат" },
+ ];
+ 
+ export function Header() {
++  const pathname = usePathname();
++  const onChat = pathname === "/chat" || pathname === "/chat/";
++  const links = onChat ? chatLinks : homeLinks;
+   const [open, setOpen] = useState(false);
+ 
+   useEffect(() => {
+@@ -48,16 +58,14 @@ export function Header() {
+         </button>
+         <nav className={open ? "nav is-open" : "nav"} id="nav" aria-label="Главная навигация">
+           {links.map((link) => (
+-            <a
+-              key={link.href}
+-              href={link.href}
+-              onClick={() => setOpen(false)}
+-            >
++            <Link key={link.href} href={link.href} onClick={() => setOpen(false)}>
+               {link.label}
+-            </a>
++            </Link>
+           ))}
+         </nav>
+-        <VkLink className="btn btn-lime header-cta">Начать</VkLink>
++        <Link className="btn btn-lime header-cta" href="/chat/">
++          {onChat ? "В чат" : "Начать"}
++        </Link>
+       </header>
+     </div>
+   );
+diff --git a/components/logo.tsx b/components/logo.tsx
+index 89a7b68..4951552 100644
+--- a/components/logo.tsx
++++ b/components/logo.tsx
+@@ -1,13 +1,14 @@
++import Link from "next/link";
+ import { Icon } from "@/components/icon";
+ import { siteName } from "@/lib/site";
+ 
+ export function Logo() {
+   return (
+-    <a className="logo" href="#top" aria-label={`${siteName}, на главную`}>
++    <Link className="logo" href="/" aria-label={`${siteName}, на главную`}>
+       <span className="logo-mark">
+         <Icon name="logo" />
+       </span>
+       <span className="logo-word">{siteName}</span>
+-    </a>
++    </Link>
+   );
+ }
+diff --git a/lib/chat-api.ts b/lib/chat-api.ts
+new file mode 100644
+index 0000000..c474f51
+--- /dev/null
++++ b/lib/chat-api.ts
+@@ -0,0 +1,191 @@
++/** Клиент публичного web-gateway (dating-bot). APP token на сервере gateway. */
++
++export type Phase = "idle" | "searching" | "chatting";
++
++export type ChatEvent =
++  | { type: "partner_found" }
++  | { type: "message"; text: string }
++  | { type: "partner_left"; reason?: string };
++
++export type GuestSession = {
++  token: string;
++  guestId: number;
++};
++
++const TOKEN_KEY = "iskra_guest_token";
++const GUEST_KEY = "iskra_guest_id";
++
++export function chatApiBaseUrl(): string {
++  const raw = process.env.NEXT_PUBLIC_CHAT_API_URL?.trim();
++  if (!raw) {
++    throw new Error("Не задан NEXT_PUBLIC_CHAT_API_URL");
++  }
++  return raw.replace(/\/$/, "");
++}
++
++export function chatApiConfigured(): boolean {
++  return Boolean(process.env.NEXT_PUBLIC_CHAT_API_URL?.trim());
++}
++
++function wsBaseUrl(httpBase: string): string {
++  if (httpBase.startsWith("https://")) {
++    return "wss://" + httpBase.slice("https://".length);
++  }
++  if (httpBase.startsWith("http://")) {
++    return "ws://" + httpBase.slice("http://".length);
++  }
++  return httpBase;
++}
++
++export function loadStoredGuest(): GuestSession | null {
++  if (typeof window === "undefined") return null;
++  const token = window.localStorage.getItem(TOKEN_KEY);
++  const guestRaw = window.localStorage.getItem(GUEST_KEY);
++  if (!token || !guestRaw) return null;
++  const guestId = Number(guestRaw);
++  if (!Number.isFinite(guestId) || guestId <= 0) return null;
++  return { token, guestId };
++}
++
++export function storeGuest(session: GuestSession): void {
++  window.localStorage.setItem(TOKEN_KEY, session.token);
++  window.localStorage.setItem(GUEST_KEY, String(session.guestId));
++}
++
++export function clearStoredGuest(): void {
++  window.localStorage.removeItem(TOKEN_KEY);
++  window.localStorage.removeItem(GUEST_KEY);
++}
++
++async function api<T>(
++  path: string,
++  token: string | null,
++  init?: RequestInit,
++): Promise<T> {
++  const headers = new Headers(init?.headers);
++  if (token) headers.set("Authorization", `Bearer ${token}`);
++  if (init?.body && !headers.has("Content-Type")) {
++    headers.set("Content-Type", "application/json");
++  }
++  const response = await fetch(`${chatApiBaseUrl()}${path}`, {
++    ...init,
++    headers,
++  });
++  if (response.status === 204) {
++    return undefined as T;
++  }
++  const text = await response.text();
++  if (!response.ok) {
++    throw new Error(text || `HTTP ${response.status}`);
++  }
++  if (!text) return undefined as T;
++  return JSON.parse(text) as T;
++}
++
++export async function createGuest(): Promise<GuestSession> {
++  const body = await api<{ token: string; guest_id: number }>(
++    "/api/v1/guests",
++    null,
++    { method: "POST" },
++  );
++  const session = { token: body.token, guestId: body.guest_id };
++  storeGuest(session);
++  return session;
++}
++
++export async function ensureGuest(): Promise<GuestSession> {
++  const existing = loadStoredGuest();
++  if (existing) {
++    try {
++      await api("/api/v1/me/visit", existing.token, { method: "POST" });
++      return existing;
++    } catch {
++      clearStoredGuest();
++    }
++  }
++  return createGuest();
++}
++
++export async function getState(token: string): Promise<Phase> {
++  const body = await api<{ phase: Phase }>("/api/v1/me/state", token);
++  return body.phase;
++}
++
++export async function startSearch(token: string): Promise<Phase> {
++  const body = await api<{ phase: Phase }>("/api/v1/me/search", token, {
++    method: "POST",
++  });
++  return body.phase;
++}
++
++export async function stopChat(token: string): Promise<{ wasActive: boolean }> {
++  const body = await api<{ was_active: boolean }>("/api/v1/me/stop", token, {
++    method: "POST",
++  });
++  return { wasActive: body.was_active };
++}
++
++export async function reportAndSearch(token: string): Promise<Phase> {
++  const body = await api<{ phase: Phase }>("/api/v1/me/report", token, {
++    method: "POST",
++  });
++  return body.phase;
++}
++
++export async function sendMessage(
++  token: string,
++  text: string,
++): Promise<{ delivered: boolean; phase: Phase }> {
++  return api("/api/v1/me/messages", token, {
++    method: "POST",
++    body: JSON.stringify({ text }),
++  });
++}
++
++export function openEvents(
++  token: string,
++  onEvent: (event: ChatEvent) => void,
++  onStatus: (status: "connecting" | "open" | "closed") => void,
++): () => void {
++  const url = `${wsBaseUrl(chatApiBaseUrl())}/api/v1/me/events?token=${encodeURIComponent(token)}`;
++  let closed = false;
++  let socket: WebSocket | null = null;
++  let retry = 0;
++  let timer: number | undefined;
++
++  const connect = () => {
++    if (closed) return;
++    onStatus("connecting");
++    socket = new WebSocket(url);
++    socket.onopen = () => {
++      retry = 0;
++      onStatus("open");
++    };
++    socket.onmessage = (message) => {
++      try {
++        const data = JSON.parse(String(message.data)) as ChatEvent;
++        if (data && typeof data.type === "string") onEvent(data);
++      } catch {
++        /* ignore */
++      }
++    };
++    socket.onclose = () => {
++      onStatus("closed");
++      if (closed) return;
++      const delay = Math.min(1000 * 2 ** retry, 15000);
++      retry += 1;
++      timer = window.setTimeout(connect, delay);
++    };
++    socket.onerror = () => {
++      socket?.close();
++    };
++  };
++
++  connect();
++
++  return () => {
++    closed = true;
++    if (timer) window.clearTimeout(timer);
++    socket?.close();
++  };
++}
+-- 
+2.43.0
+
