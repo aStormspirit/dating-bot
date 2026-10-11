@@ -10,6 +10,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY bot.py .
 COPY vk_bot ./vk_bot
-COPY supabase ./supabase
 
 CMD ["python", "bot.py"]

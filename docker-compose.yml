@@ -1,6 +1,7 @@
-# Бот ВК, база Supabase Postgres и локальная панель Studio.
+# Chat API, бот ВК и Telegram, Redis, база Supabase Postgres и локальная панель Studio.
 # Локально: docker compose up --build
-# На сервере CI подставляет BOT_IMAGE и PREMIUM_IMAGE из Docker Hub, сборки нет.
+# На сервере CI подставляет BOT_IMAGE, CHAT_API_IMAGE и PREMIUM_IMAGE из Docker Hub, сборки нет.
+# Chat API: http://127.0.0.1:8000/docs
 # Studio: http://127.0.0.1:54323
 
 services:
@@ -36,6 +37,40 @@ services:
       retries: 20
       start_period: 20s
 
+  redis:
+    image: redis:7-alpine
+    container_name: vk-bot-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  chat-api:
+    image: ${CHAT_API_IMAGE:-dating-chat-api:local}
+    build:
+      context: .
+      dockerfile: chat_api/Dockerfile
+    container_name: vk-chat-api
+    restart: unless-stopped
+    ports:
+      - "${CHAT_API_PUBLISH:-127.0.0.1:8000}:8000"
+    environment:
+      DATABASE_URL: postgresql://supabase_admin:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}
+      REDIS_URL: redis://redis:6379/0
+      CHAT_API_SERVICE_TOKEN: ${CHAT_API_SERVICE_TOKEN:?Задайте CHAT_API_SERVICE_TOKEN в .env}
+      GUEST_JWT_SECRET: ${GUEST_JWT_SECRET:?Задайте GUEST_JWT_SECRET в .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   bot:
     image: ${BOT_IMAGE:-dating-bot:local}
     build: .
@@ -43,12 +78,13 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://supabase_admin:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}
+      CHAT_API_URL: http://chat-api:8000
+      REDIS_URL: redis://redis:6379/0
       PREMIUM_URL: ${PREMIUM_URL:-https://vk.cc/d2HjY8}
-    volumes:
-      - ./data:/app/data:ro
     depends_on:
-      db:
+      chat-api:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   meta:
@@ -124,6 +160,7 @@ services:
     environment:
       PAY_HOST: ${PAY_HOST:-pay.chatwithyou.site}
       STUDIO_HOST: ${STUDIO_HOST:-studio.chatwithyou.site}
+      API_HOST: ${API_HOST:-api.chatwithyou.site}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -131,8 +168,10 @@ services:
     depends_on:
       - premium
       - studio
+      - chat-api
 
 volumes:
   supabase_data:
+  redis_data:
   caddy_data:
   caddy_config:

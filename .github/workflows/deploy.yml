@@ -43,6 +43,7 @@ jobs:
         run: |
           user=$(printf '%s' "$DOCKERHUB_USERNAME" | tr '[:upper:]' '[:lower:]')
           echo "bot_image=${user}/dating-bot:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "chat_api_image=${user}/dating-chat-api:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
           echo "premium_image=${user}/dating-premium:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Login to Docker Hub
@@ -63,6 +64,17 @@ jobs:
           tags: ${{ steps.images.outputs.bot_image }}
           cache-from: type=gha,scope=bot
           cache-to: type=gha,scope=bot,mode=max
+
+      - name: Push chat API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: chat_api/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.images.outputs.chat_api_image }}
+          cache-from: type=gha,scope=chat-api
+          cache-to: type=gha,scope=chat-api,mode=max
 
       - name: Push premium image
         uses: docker/build-push-action@v6
@@ -111,6 +123,7 @@ jobs:
             fi
             hub_user=$(printf '%s' "$DOCKERHUB_USERNAME" | tr '[:upper:]' '[:lower:]')
             export BOT_IMAGE="${hub_user}/dating-bot:${GIT_SHA}"
+            export CHAT_API_IMAGE="${hub_user}/dating-chat-api:${GIT_SHA}"
             export PREMIUM_IMAGE="${hub_user}/dating-premium:${GIT_SHA}"
             if [ ! -d "$APP_DIR/.git" ]; then
               mkdir -p "$(dirname "$APP_DIR")"

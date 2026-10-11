@@ -8,18 +8,7 @@ from pathlib import Path
 
 from vkbottle.bot import Message, MessageEvent
 
-from vk_bot.chat import (
-    FOUND_TEXT,
-    SEARCHING_TEXT,
-    begin_search,
-    format_partner,
-    is_chatting,
-    is_searching,
-    pair_searcher,
-    partner_of,
-    remember_visitor,
-    stop_chat,
-)
+from vk_bot.api_client import ChatApiError, NotChattingError, chat_api
 from vk_bot.gateway import gateway
 from vk_bot.peer import Peer
 from vk_bot.photos import upload_photo
@@ -28,7 +17,11 @@ from vk_bot.ui import (
     CHAT_BTN_REPORT,
     CHAT_BTN_STOP,
     COMMUNITY_GREETING,
+    FOUND_TEXT,
     MENU_BTN_SEARCH,
+    PARTNER_LEFT_TEXT,
+    SEARCHING_TEXT,
+    SERVICE_DOWN_TEXT,
     build_chat_keyboard,
     build_main_keyboard,
     menu_message,
@@ -36,7 +29,6 @@ from vk_bot.ui import (
 )
 
 _SEARCH_BUTTONS = {MENU_BTN_SEARCH, "🔍 Поиск", CHAT_BTN_NEXT, "Начать"}
-_PARTNER_LEFT = "Собеседник завершил диалог. Нажми «Найти собеседника», чтобы найти нового."
 
 
 def parse_payload(message: Message) -> dict:
@@ -97,11 +89,6 @@ async def _reply(
     return await gateway.send(peer, text, kind, photo=photo)
 
 
-async def _notify_left(partner: Peer) -> None:
-    """Сообщает второй стороне, что диалог закончился."""
-    await gateway.send(partner, menu_message(_PARTNER_LEFT), "main")
-
-
 async def handle_start(peer: Peer, text: str, payload: dict, vk_message: Message | None) -> bool:
     """Кнопка «Начать» ставит человека в поиск собеседника."""
     if not _is_start(text, payload):
@@ -120,15 +107,13 @@ async def handle_stop(
     """Заканчивает диалог или поиск и возвращает основное меню."""
     if text != CHAT_BTN_STOP or not (chatting or searching):
         return False
-    partner = stop_chat(peer)
+    await chat_api.stop(peer)
     await _reply(
         peer,
         menu_message("Диалог остановлен. Нажми «Найти собеседника», чтобы начать снова."),
         "main",
         vk_message,
     )
-    if partner is not None:
-        await _notify_left(partner)
     return True
 
 
@@ -137,15 +122,24 @@ async def handle_report(peer: Peer, text: str, chatting: bool, vk_message: Messa
     if text != CHAT_BTN_REPORT or not chatting:
         return False
     await _reply(peer, menu_message("Жалоба отправлена. Ищем другого собеседника."), "chat", vk_message)
-    await connect_with_partner(peer, vk_message)
+    try:
+        phase = await chat_api.report(peer)
+    except NotChattingError:
+        phase = await chat_api.search(peer)
+    await _announce_search(peer, phase, vk_message)
     return True
 
 
-async def handle_search(peer: Peer, text: str, vk_message: Message | None) -> bool:
+async def handle_search(
+    peer: Peer,
+    text: str,
+    searching: bool,
+    vk_message: Message | None,
+) -> bool:
     """Запускает поиск по кнопке «Найти собеседника» или «Следующий собеседник»."""
     if text not in _SEARCH_BUTTONS:
         return False
-    if is_searching(peer):
+    if searching:
         await _reply(peer, SEARCHING_TEXT, "chat", vk_message)
         return True
     await connect_with_partner(peer, vk_message)
@@ -164,29 +158,26 @@ async def handle_chat_line(
     if not text:
         await _reply(peer, "Напиши текстом.", "chat", vk_message)
         return True
-    partner = partner_of(peer)
-    if partner is None:
-        stop_chat(peer)
-        await _reply(peer, menu_message(_PARTNER_LEFT), "main", vk_message)
-        return True
-    delivered = await gateway.send(partner, format_partner(text), "chat")
-    if delivered:
-        return True
-    stop_chat(peer)
-    await _reply(peer, menu_message("Не удалось доставить сообщение. Диалог остановлен."), "main", vk_message)
+    try:
+        delivered = (await chat_api.send_message(peer, text)).delivered
+    except NotChattingError:
+        delivered = False
+    if not delivered:
+        await _reply(peer, menu_message(PARTNER_LEFT_TEXT), "main", vk_message)
     return True
 
 
 async def handle_menu_or_dialog(peer: Peer, text: str, vk_message: Message | None) -> None:
     """Разбирает меню и реплики диалога."""
-    chatting = is_chatting(peer)
-    searching = is_searching(peer)
+    phase = await chat_api.phase(peer)
+    chatting = phase == "chatting"
+    searching = phase == "searching"
 
     if await handle_stop(peer, text, chatting, searching, vk_message):
         return
     if await handle_report(peer, text, chatting, vk_message):
         return
-    if await handle_search(peer, text, vk_message):
+    if await handle_search(peer, text, searching, vk_message):
         return
     if await handle_chat_line(peer, text, chatting, vk_message):
         return
@@ -202,12 +193,16 @@ async def handle_incoming(
 ) -> None:
     """Маршрутизирует сообщение из ВК или Telegram: старт, затем меню или диалог."""
     try:
-        remember_visitor(peer)
-    except Exception as exc:  # noqa: BLE001 — сбой базы не должен оставлять человека без ответа
-        print(f"Не записал визит {peer.user_id}: {type(exc).__name__}: {exc}", flush=True)
-    if await handle_start(peer, text, payload, vk_message):
-        return
-    await handle_menu_or_dialog(peer, text, vk_message)
+        await chat_api.visit(peer)
+    except ChatApiError as exc:
+        print(f"Не записал визит {peer.user_id}: {exc}", flush=True)
+    try:
+        if await handle_start(peer, text, payload, vk_message):
+            return
+        await handle_menu_or_dialog(peer, text, vk_message)
+    except ChatApiError as exc:
+        print(f"Chat API недоступен для {peer}: {exc}", flush=True)
+        await _reply(peer, SERVICE_DOWN_TEXT, "main", vk_message)
 
 
 def vk_handler(bot_key: str):
@@ -270,8 +265,12 @@ def vk_start_handler(bot_key: str):
             return
         if event.user_id is None or event.user_id <= 0:
             return
+        peer = Peer("vk", bot_key, event.user_id)
         try:
-            await connect_with_partner(Peer("vk", bot_key, event.user_id), None)
+            await connect_with_partner(peer, None)
+        except ChatApiError as exc:
+            print(f"Chat API недоступен для {peer}: {exc}", flush=True)
+            await gateway.send(peer, SERVICE_DOWN_TEXT, "main")
         except Exception as exc:  # noqa: BLE001
             print(
                 f"Ошибка кнопки Начать group={bot_key} from={event.user_id}: "
@@ -376,18 +375,13 @@ async def attach_start_buttons(api: object, bot_key: str) -> None:
             break
 
 
+async def _announce_search(peer: Peer, phase: str, vk_message: Message | None) -> None:
+    """Сообщает итог поиска. Второй стороне о паре и прежнему собеседнику об уходе пишет API."""
+    await _reply(peer, SEARCHING_TEXT, "chat", vk_message)
+    if phase == "chatting":
+        await _reply(peer, FOUND_TEXT, "chat", vk_message)
+
+
 async def connect_with_partner(peer: Peer, vk_message: Message | None) -> None:
     """Ставит пользователя в поиск и соединяет с другим живым человеком, если он уже ждёт."""
-    previous = stop_chat(peer)
-    generation = begin_search(peer)
-    await _reply(peer, SEARCHING_TEXT, "chat", vk_message)
-    if previous is not None:
-        await _notify_left(previous)
-    paired = pair_searcher(peer, generation)
-    if paired is None:
-        return
-    partner, created = paired
-    if not created:
-        return
-    await _reply(peer, FOUND_TEXT, "chat", vk_message)
-    await gateway.send(partner, FOUND_TEXT, "chat")
+    await _announce_search(peer, await chat_api.search(peer), vk_message)

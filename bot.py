@@ -11,8 +11,9 @@ from vkbottle import GroupEventType
 from vkbottle.bot import Bot, MessageEvent
 from vkbottle.http.aiohttp import AiohttpClient
 
-from vk_bot.chat import adopt_legacy_vk
-from vk_bot.config import tg_tokens, vk_tokens
+from vk_bot.api_client import chat_api
+from vk_bot.config import CHAT_API_SERVICE_TOKEN, CHAT_API_URL, tg_tokens, vk_tokens
+from vk_bot.events import consume_events
 from vk_bot.gateway import gateway
 from vk_bot.handlers import answer_waiting, attach_start_buttons, vk_handler, vk_start_handler
 from vk_bot.longpoll import VersionedBotPolling
@@ -65,10 +66,11 @@ async def _run() -> None:
         raise SystemExit(
             "Нужен хотя бы один токен. Укажите VK_TOKEN или VK_TOKENS и, если нужно, TG_TOKENS."
         )
+    if not CHAT_API_SERVICE_TOKEN:
+        raise SystemExit("Не задан CHAT_API_SERVICE_TOKEN: без него Chat API не примет запросы бота.")
 
     rebuild_vkbottle_response_models()
     tasks: list[asyncio.Task] = []
-    first_group: str | None = None
     print(f"Токенов ВК: {len(tokens)}. Токенов Telegram: {len(telegram)}.")
     for token in tokens:
         try:
@@ -77,8 +79,6 @@ async def _run() -> None:
             print(f"Токен сообщества ВК пропущен: {exc}", file=sys.stderr)
             continue
         bot_key = str(group_id)
-        if first_group is None:
-            first_group = bot_key
         bot = community_bot(token)
         gateway.add_vk(bot_key, bot.api)
         bot.on.message()(vk_handler(bot_key))
@@ -90,8 +90,6 @@ async def _run() -> None:
     if tokens and not tasks:
         raise SystemExit("Ни одно сообщество ВК не прошло проверку Long Poll.")
 
-    if first_group is not None:
-        adopt_legacy_vk(first_group)
     if telegram:
         try:
             from vk_bot.telegram_bot import telegram_runners
@@ -106,10 +104,16 @@ async def _run() -> None:
     if not tasks:
         raise SystemExit("Нет запущенных ботов.")
 
-    print("Сессии диалогов хранятся в Supabase Postgres.")
-    print("Анонимный чат: сообщения пересылаются живому собеседнику.")
+    events = asyncio.create_task(consume_events(), name="chat-events")
+    events.add_done_callback(_log_task_end)
+
+    print(f"Логика чата: Chat API {CHAT_API_URL}.")
     print("Бот запущен. Ожидание сообщений...")
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    try:
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+    finally:
+        events.cancel()
+        await chat_api.aclose()
     errors = [result for result in results if isinstance(result, BaseException)]
     if errors and len(errors) == len(results):
         raise errors[0]

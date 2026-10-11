@@ -1,4 +1,4 @@
-"""Настройки запуска: токен, версия API и подключение к базе."""
+"""Настройки запуска: токены, версия API ВК и адреса Chat API."""
 
 import os
 import re
@@ -23,7 +23,7 @@ _TG_TOKEN = re.compile(r"^\d{6,}:[A-Za-z0-9_-]{20,}$")
 
 
 def vk_tokens() -> list[str]:
-    """Токены сообществ ВК. Первый — исходное сообщество, к нему крепятся старые диалоги."""
+    """Токены сообществ ВК."""
     raw = _token_list(os.getenv("VK_TOKEN") or "", os.getenv("VK_TOKENS") or "")
     return [token for token in raw if not _TG_TOKEN.match(token)]
 
@@ -39,16 +39,12 @@ def tg_tokens() -> list[str]:
     return [token for token in raw if _TG_TOKEN.match(token)]
 
 
-# Диалог после опенера идёт через Abliteration. Ключ: https://docs.abliteration.ai/quickstart
-ABLIT_API_KEY = (os.getenv("ABLIT_KEY") or "").strip()
-ABLIT_BASE_URL = "https://api.abliteration.ai/v1"
-ABLIT_MODEL = (os.getenv("ABLIT_MODEL") or "abliterated-model").strip()
-ABLIT_TIMEOUT = float(os.getenv("ABLIT_TIMEOUT") or "30")
-
-ROOT_DIR = Path(__file__).resolve().parent.parent
-# Старый файл сессий. При первом запуске с базой строки из него переносятся в Postgres.
-CHATS_PATH = ROOT_DIR / "data" / "chats.json"
-DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip()
+# Логика чата живёт в Chat API. Бот вызывает его REST и читает события из Redis.
+CHAT_API_URL = (os.getenv("CHAT_API_URL") or "http://localhost:8000").strip()
+CHAT_API_SERVICE_TOKEN = (os.getenv("CHAT_API_SERVICE_TOKEN") or "").strip()
+REDIS_URL = (os.getenv("REDIS_URL") or "redis://localhost:6379/0").strip()
+# Имя потребителя в группе Redis. Постоянное, чтобы после перезапуска дочитать неподтверждённые события.
+EVENTS_CONSUMER = (os.getenv("EVENTS_CONSUMER") or "bot").strip()
 
 PREMIUM_URL = (os.getenv("PREMIUM_URL") or "https://vk.cc/d2HjY8").strip()
 _ASSETS = Path(__file__).resolve().parent / "assets"

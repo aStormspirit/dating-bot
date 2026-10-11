@@ -5,3 +5,7 @@
 {$STUDIO_HOST:studio.chatwithyou.site} {
 	reverse_proxy studio:3000
 }
+
+{$API_HOST:api.chatwithyou.site} {
+	reverse_proxy chat-api:8000
+}
