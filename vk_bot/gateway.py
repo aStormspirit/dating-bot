@@ -8,7 +8,6 @@ from typing import Any
 from vk_bot.peer import Peer
 from vk_bot.ui import (
     CHAT_BTN_NEXT,
-    CHAT_BTN_REPORT,
     CHAT_BTN_STOP,
     START_BTN,
     build_chat_keyboard,
@@ -35,7 +34,6 @@ def _tg_keyboard(kind: str):
         rows = [
             [KeyboardButton(text=CHAT_BTN_NEXT)],
             [KeyboardButton(text=CHAT_BTN_STOP)],
-            [KeyboardButton(text=CHAT_BTN_REPORT)],
         ]
     else:
         rows = [[KeyboardButton(text=START_BTN)]]

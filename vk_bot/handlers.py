@@ -15,7 +15,6 @@ from vk_bot.peer import Peer
 from vk_bot.photos import upload_photo
 from vk_bot.ui import (
     CHAT_BTN_NEXT,
-    CHAT_BTN_REPORT,
     CHAT_BTN_STOP,
     COMMUNITY_GREETING,
     FOUND_TEXT,
@@ -114,19 +113,6 @@ async def handle_stop(
     return True
 
 
-async def handle_report(peer: Peer, text: str, chatting: bool, vk_message: Message | None) -> bool:
-    """Принимает жалобу в активном диалоге и сразу ищет другого собеседника."""
-    if text != CHAT_BTN_REPORT or not chatting:
-        return False
-    await _reply(peer, menu_message("Жалоба отправлена. Ищем другого собеседника."), "chat", vk_message)
-    try:
-        phase = await chat_api.report(peer)
-    except NotChattingError:
-        phase = await chat_api.search(peer)
-    await _announce_search(peer, phase, vk_message)
-    return True
-
-
 async def handle_search(
     peer: Peer,
     text: str,
@@ -171,8 +157,6 @@ async def handle_menu_or_dialog(peer: Peer, text: str, vk_message: Message | Non
     searching = phase == "searching"
 
     if await handle_stop(peer, text, chatting, searching, vk_message):
-        return
-    if await handle_report(peer, text, chatting, vk_message):
         return
     if await handle_search(peer, text, searching, vk_message):
         return

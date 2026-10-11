@@ -21,7 +21,6 @@ WELCOME_TEXT = "Привет! 👋 Это чат для анонимных зн�
 MENU_BTN_SEARCH = "🔍 Найти собеседника"
 
 CHAT_BTN_NEXT = "➡️ Следующий собеседник"
-CHAT_BTN_REPORT = "🛑⚠️ Пожаловаться на спам"
 CHAT_BTN_STOP = "🛑 Закончить диалог"
 
 SEARCHING_TEXT = "🔎 Ищем собеседника..."
@@ -70,14 +69,12 @@ def build_idle_keyboard() -> str:
 
 
 def build_chat_keyboard() -> str:
-    """Клавиатура активного диалога: три кнопки друг под другом."""
+    """Клавиатура активного диалога: две кнопки друг под другом."""
     keyboard = (
         Keyboard(one_time=False, inline=False)
         .add(Text(CHAT_BTN_NEXT), color=KeyboardButtonColor.SECONDARY)
         .row()
         .add(Text(CHAT_BTN_STOP), color=KeyboardButtonColor.SECONDARY)
-        .row()
-        .add(Text(CHAT_BTN_REPORT), color=KeyboardButtonColor.NEGATIVE)
     )
     return keyboard.get_json()
 

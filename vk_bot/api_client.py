@@ -64,9 +64,6 @@ class ChatApiClient:
         """True, если был поиск или диалог."""
         return (await self._request("POST", peer, "stop"))["was_active"]
 
-    async def report(self, peer: Peer) -> str:
-        return (await self._request("POST", peer, "report"))["phase"]
-
     async def send_message(self, peer: Peer, text: str) -> SendResult:
         body = await self._request("POST", peer, "messages", {"text": text})
         return SendResult(delivered=body["delivered"], phase=body["phase"])
