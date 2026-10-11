@@ -70,6 +70,18 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   bot:
     image: ${BOT_IMAGE:-dating-bot:local}
@@ -148,6 +160,25 @@ services:
       db:
         condition: service_healthy
 
+  # Публичный gateway для сайта: держит APP token, проксирует web peers и /events/web.
+  # Chat API остаётся на loopback / Cloudflare Access; браузер ходит только сюда.
+  web-gateway:
+    image: ${WEB_GATEWAY_IMAGE:-dating-web-gateway:local}
+    build: ./web_gateway
+    container_name: vk-web-gateway
+    restart: unless-stopped
+    ports:
+      - "${WEB_GATEWAY_PUBLISH:-127.0.0.1:8001}:8000"
+    environment:
+      CHAT_API_URL: http://chat-api:8000
+      CHAT_API_APP_TOKEN: ${CHAT_API_APP_TOKEN:?Задайте CHAT_API_APP_TOKEN в .env}
+      GUEST_JWT_SECRET: ${GUEST_JWT_SECRET:?Задайте GUEST_JWT_SECRET в .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,https://chatwithyou.site}
+      WEB_BOT_KEY: ${WEB_BOT_KEY:-site}
+    depends_on:
+      chat-api:
+        condition: service_healthy
+
   caddy:
     image: caddy:2.10
     container_name: vk-bot-caddy
@@ -159,12 +190,14 @@ services:
       - "443:443/udp"
     environment:
       PAY_HOST: ${PAY_HOST:-pay.chatwithyou.site}
+      API_HOST: ${API_HOST:-api.chatwithyou.site}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
       - premium
+      - web-gateway
 
   # Studio и Chat API доступны снаружи только через Cloudflare Tunnel под Cloudflare Access.
   # Адреса и правила входа настроены в Cloudflare, контейнеру нужен только токен туннеля.

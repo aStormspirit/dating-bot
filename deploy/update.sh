@@ -9,8 +9,8 @@ if [ -z "${GIT_SHA:-}" ]; then
   echo "Не задан GIT_SHA." >&2
   exit 1
 fi
-if [ -z "${BOT_IMAGE:-}" ] || [ -z "${PREMIUM_IMAGE:-}" ] || [ -z "${CHAT_API_IMAGE:-}" ]; then
-  echo "Не заданы BOT_IMAGE, CHAT_API_IMAGE и PREMIUM_IMAGE." >&2
+if [ -z "${BOT_IMAGE:-}" ] || [ -z "${PREMIUM_IMAGE:-}" ] || [ -z "${CHAT_API_IMAGE:-}" ] || [ -z "${WEB_GATEWAY_IMAGE:-}" ]; then
+  echo "Не заданы BOT_IMAGE, CHAT_API_IMAGE, PREMIUM_IMAGE и WEB_GATEWAY_IMAGE." >&2
   exit 1
 fi
 
@@ -157,20 +157,27 @@ drop_env() {
 }
 
 ensure_secret CHAT_API_SERVICE_TOKEN
+ensure_secret GUEST_JWT_SECRET
 require_secret CHAT_API_APP_TOKEN
 require_secret CLOUDFLARE_TUNNEL_TOKEN
-for stale in GUEST_JWT_SECRET CORS_ORIGINS STUDIO_HOST API_HOST; do
+for stale in STUDIO_HOST; do
   drop_env "$stale"
 done
 
 PAY_HOST="${PAY_HOST:-pay.chatwithyou.site}"
 STUDIO_HOST="${STUDIO_HOST:-studio.chatwithyou.site}"
+API_HOST="${API_HOST:-api.chatwithyou.site}"
+CORS_ORIGINS="${CORS_ORIGINS:-https://chatwithyou.site,https://www.chatwithyou.site}"
 
 set_env PAY_HOST "$PAY_HOST"
+set_env API_HOST "$API_HOST"
+set_env CORS_ORIGINS "$CORS_ORIGINS"
 set_env PREMIUM_URL "https://vk.cc/d2HjY8"
 set_env STUDIO_PUBLIC_URL "https://${STUDIO_HOST}"
 set_env PREMIUM_PUBLISH "127.0.0.1:8080"
 set_env CHAT_API_PUBLISH "127.0.0.1:8000"
+set_env WEB_GATEWAY_PUBLISH "127.0.0.1:8001"
+set_env WEB_GATEWAY_IMAGE "$WEB_GATEWAY_IMAGE"
 
 lookup_ip() {
   if command -v curl >/dev/null 2>&1; then
@@ -194,13 +201,14 @@ fi
 docker compose --profile proxy pull
 docker logout >/dev/null 2>&1 || true
 docker compose --profile proxy up -d --no-build --remove-orphans db redis
-docker compose --profile proxy up -d --no-build --remove-orphans --force-recreate chat-api premium
+docker compose --profile proxy up -d --no-build --remove-orphans --force-recreate chat-api premium web-gateway
 docker compose --profile proxy up -d --no-build --remove-orphans --force-recreate bot
 docker compose --profile proxy up -d --no-build caddy cloudflared
 docker restart vk-bot-caddy
 sleep 12
 docker logs vk-bot-cloudflared --tail 20 2>&1 | grep -E "Registered tunnel connection|ERR|error" || true
 docker logs vk-chat-api --tail 40 2>&1 | grep -E "Схема базы|Application startup|ERROR|Traceback" || true
+docker logs vk-web-gateway --tail 40 2>&1 | grep -E "Подключено к Chat API|Application startup|ERROR|Traceback" || true
 docker logs vk-bot --tail 80 2>&1 | grep -E "Токенов ВК|VK:|Telegram:|Chat API|События|пропущен|OK:|Нет права|Нет доступа|Токен невалиден|Бот запущен|Ошибка запуска|VK Error|Traceback" || true
 sleep 8
 docker logs vk-bot-caddy --tail 20 || true

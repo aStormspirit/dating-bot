@@ -1,3 +1,8 @@
 {$PAY_HOST:pay.chatwithyou.site} {
 	reverse_proxy premium:8000
 }
+
+# Браузерный Chat API (web gateway). Сам Chat API наружу не отдаём.
+{$API_HOST:api.chatwithyou.site} {
+	reverse_proxy web-gateway:8000
+}

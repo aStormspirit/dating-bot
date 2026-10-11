@@ -45,6 +45,7 @@ jobs:
           echo "bot_image=${user}/dating-bot:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
           echo "chat_api_image=${user}/dating-chat-api:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
           echo "premium_image=${user}/dating-premium:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "web_gateway_image=${user}/dating-web-gateway:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -85,6 +86,16 @@ jobs:
           tags: ${{ steps.images.outputs.premium_image }}
           cache-from: type=gha,scope=premium
           cache-to: type=gha,scope=premium,mode=max
+
+      - name: Push web gateway image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./web_gateway
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.images.outputs.web_gateway_image }}
+          cache-from: type=gha,scope=web-gateway
+          cache-to: type=gha,scope=web-gateway,mode=max
 
   deploy:
     needs: publish
@@ -127,6 +138,7 @@ jobs:
             export BOT_IMAGE="${hub_user}/dating-bot:${GIT_SHA}"
             export CHAT_API_IMAGE="${hub_user}/dating-chat-api:${GIT_SHA}"
             export PREMIUM_IMAGE="${hub_user}/dating-premium:${GIT_SHA}"
+            export WEB_GATEWAY_IMAGE="${hub_user}/dating-web-gateway:${GIT_SHA}"
             if [ ! -d "$APP_DIR/.git" ]; then
               mkdir -p "$(dirname "$APP_DIR")"
               git clone https://github.com/aStormspirit/dating-bot.git "$APP_DIR"
