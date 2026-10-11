@@ -12,16 +12,19 @@ from vk_bot.ui import (
     CHAT_BTN_STOP,
     START_BTN,
     build_chat_keyboard,
+    build_idle_keyboard,
     build_main_keyboard,
     new_random_id,
 )
 
 
-def _vk_keyboard(kind: str) -> str:
-    """Клавиатура ВК: меню или кнопки диалога."""
+def vk_keyboard(kind: str) -> str:
+    """Клавиатура ВК: кнопки диалога, inline «Начать» для бесед или постоянная «Начать» для лички."""
     if kind == "chat":
         return build_chat_keyboard()
-    return build_main_keyboard()
+    if kind == "greeting":
+        return build_main_keyboard()
+    return build_idle_keyboard()
 
 
 def _tg_keyboard(kind: str):
@@ -65,7 +68,8 @@ class Gateway:
         except Exception as exc:  # noqa: BLE001 — сбой доставки не должен ронять общий обработчик
             print(
                 f"Не удалось написать {peer.platform}:{peer.bot_key}:{peer.user_id}: "
-                f"{type(exc).__name__}: {exc}"
+                f"{type(exc).__name__}: {exc}",
+                flush=True,
             )
             return False
 
@@ -77,7 +81,7 @@ class Gateway:
             await api.messages.send(
                 peer_id=peer.user_id,
                 message=text,
-                keyboard=_vk_keyboard(kind),
+                keyboard=vk_keyboard(kind),
                 random_id=new_random_id(),
             )
         except Exception as exc:

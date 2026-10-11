@@ -12,7 +12,7 @@ from vk_bot.api_client import ChatApiError, chat_api
 from vk_bot.config import EVENTS_CONSUMER, REDIS_URL
 from vk_bot.gateway import gateway
 from vk_bot.peer import Peer
-from vk_bot.ui import FOUND_TEXT, PARTNER_LEFT_TEXT, UNDELIVERED_TEXT, format_partner, menu_message
+from vk_bot.ui import FOUND_TEXT, PARTNER_LEFT_TEXT, UNDELIVERED_TEXT, format_partner
 
 _GROUP = "bots"
 _PLATFORMS = ("vk", "tg")
@@ -45,7 +45,8 @@ async def _deliver(body: dict) -> None:
         delivered = await gateway.send(peer, format_partner(str(body.get("text") or "")), "chat")
     elif kind == "partner_left":
         text = UNDELIVERED_TEXT if body.get("reason") == "undeliverable" else PARTNER_LEFT_TEXT
-        await gateway.send(peer, menu_message(text), "main")
+        sent = await gateway.send(peer, text, "main")
+        print(f"Уход собеседника {peer}: {'доставлено' if sent else 'не доставлено'}", flush=True)
         return
     else:
         print(f"Неизвестное событие Chat API: {kind}", flush=True)

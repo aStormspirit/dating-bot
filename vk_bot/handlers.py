@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from pathlib import Path
@@ -9,7 +10,7 @@ from pathlib import Path
 from vkbottle.bot import Message, MessageEvent
 
 from vk_bot.api_client import ChatApiError, NotChattingError, chat_api
-from vk_bot.gateway import gateway
+from vk_bot.gateway import gateway, vk_keyboard
 from vk_bot.peer import Peer
 from vk_bot.photos import upload_photo
 from vk_bot.ui import (
@@ -19,16 +20,19 @@ from vk_bot.ui import (
     COMMUNITY_GREETING,
     FOUND_TEXT,
     MENU_BTN_SEARCH,
+    NO_PARTNERS_TEXT,
     PARTNER_LEFT_TEXT,
     SEARCHING_TEXT,
     SERVICE_DOWN_TEXT,
-    build_chat_keyboard,
     build_main_keyboard,
     menu_message,
     new_random_id,
 )
 
 _SEARCH_BUTTONS = {MENU_BTN_SEARCH, "🔍 Поиск", CHAT_BTN_NEXT, "Начать"}
+
+SEARCH_TIMEOUT_SECONDS = 30
+_search_timeouts: dict[Peer, asyncio.Task[None]] = {}
 
 
 def parse_payload(message: Message) -> dict:
@@ -51,16 +55,9 @@ def _is_start(text: str, payload: dict) -> bool:
     return payload.get("command") == "start"
 
 
-def _vk_keyboard(kind: str) -> str:
-    """JSON клавиатуры ВК для ответа в том же сообщении."""
-    if kind == "chat":
-        return build_chat_keyboard()
-    return build_main_keyboard()
-
-
 async def _answer_vk(message: Message, text: str, kind: str, *, attachment: str | None = None) -> None:
     """Пишет в тот же диалог. Если клавиатуру отклонили, отправляет тот же текст без неё."""
-    kwargs: dict = {"keyboard": _vk_keyboard(kind), "random_id": new_random_id()}
+    kwargs: dict = {"keyboard": vk_keyboard(kind), "random_id": new_random_id()}
     if attachment:
         kwargs["attachment"] = attachment
     try:
@@ -163,7 +160,7 @@ async def handle_chat_line(
     except NotChattingError:
         delivered = False
     if not delivered:
-        await _reply(peer, menu_message(PARTNER_LEFT_TEXT), "main", vk_message)
+        await _reply(peer, PARTNER_LEFT_TEXT, "main", vk_message)
     return True
 
 
@@ -220,7 +217,7 @@ def vk_handler(bot_key: str):
             payload = parse_payload(message)
             peer = Peer("vk", bot_key, message.from_id)
             if message.peer_id != message.from_id:
-                await _answer_vk(message, COMMUNITY_GREETING, "main")
+                await _answer_vk(message, COMMUNITY_GREETING, "greeting")
                 if _is_start(text, payload):
                     await connect_with_partner(peer, None)
                 return
@@ -378,8 +375,30 @@ async def attach_start_buttons(api: object, bot_key: str) -> None:
 async def _announce_search(peer: Peer, phase: str, vk_message: Message | None) -> None:
     """Сообщает итог поиска. Второй стороне о паре и прежнему собеседнику об уходе пишет API."""
     await _reply(peer, SEARCHING_TEXT, "chat", vk_message)
+    previous = _search_timeouts.pop(peer, None)
+    if previous is not None:
+        previous.cancel()
     if phase == "chatting":
         await _reply(peer, FOUND_TEXT, "chat", vk_message)
+        return
+    _search_timeouts[peer] = asyncio.create_task(_leave_queue_later(peer))
+
+
+async def _leave_queue_later(peer: Peer) -> None:
+    """Через SEARCH_TIMEOUT_SECONDS снимает с поиска, если пара так и не нашлась."""
+    try:
+        await asyncio.sleep(SEARCH_TIMEOUT_SECONDS)
+        if await chat_api.phase(peer) != "searching":
+            return
+        await chat_api.stop(peer)
+        await gateway.send(peer, NO_PARTNERS_TEXT, "main")
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — фоновая задача, иначе ошибка потеряется
+        print(f"Не снял с поиска {peer}: {type(exc).__name__}: {exc}", flush=True)
+    finally:
+        if _search_timeouts.get(peer) is asyncio.current_task():
+            del _search_timeouts[peer]
 
 
 async def connect_with_partner(peer: Peer, vk_message: Message | None) -> None:

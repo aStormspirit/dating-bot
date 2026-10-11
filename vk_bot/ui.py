@@ -25,12 +25,10 @@ CHAT_BTN_REPORT = "🛑⚠️ Пожаловаться на спам"
 CHAT_BTN_STOP = "🛑 Закончить диалог"
 
 SEARCHING_TEXT = "🔎 Ищем собеседника..."
-FOUND_TEXT = (
-    "💬 Собеседник найден. Вы можете писать ему сюда 👇\n"
-    "Реклама коммерческих услуг запрещена! Не забывайте нажимать кнопку жалобы если встречаете спам."
-)
-PARTNER_LEFT_TEXT = "Собеседник завершил диалог. Нажми «Найти собеседника», чтобы найти нового."
-UNDELIVERED_TEXT = "Не удалось доставить сообщение. Диалог остановлен."
+NO_PARTNERS_TEXT = "Сейчас собеседников нет, приходите чуть позже 😔"
+FOUND_TEXT = "💬 Собеседник найден. Вы можете писать ему сюда 👇"
+PARTNER_LEFT_TEXT = "❌ Собеседник закончил диалог.\nНажми «Начать», чтобы найти нового собеседника."
+UNDELIVERED_TEXT = "❌ Собеседник недоступен, диалог закончен.\nНажми «Начать», чтобы найти нового собеседника."
 SERVICE_DOWN_TEXT = "Сервис временно недоступен. Попробуй через минуту."
 
 
@@ -57,6 +55,15 @@ def build_main_keyboard() -> str:
     """Кнопка «Начать» под текстом. В беседе обычная клавиатура не показывается."""
     keyboard = Keyboard(inline=True).add(
         Callback(START_BTN, payload=json.dumps({"command": "start"})),
+        color=KeyboardButtonColor.POSITIVE,
+    )
+    return keyboard.get_json()
+
+
+def build_idle_keyboard() -> str:
+    """Постоянная клавиатура лички вне диалога: заменяет кнопки диалога одной «Начать»."""
+    keyboard = Keyboard(one_time=False, inline=False).add(
+        Text(START_BTN, payload={"command": "start"}),
         color=KeyboardButtonColor.POSITIVE,
     )
     return keyboard.get_json()
