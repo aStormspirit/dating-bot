@@ -55,7 +55,7 @@ app.include_router(peers.router, prefix="/api/v1")
 app.include_router(ws.router, prefix="/api/v1")
 
 
-@app.get("/health")
+@app.get("/health", tags=["service"], summary="Проверка готовности")
 async def health() -> dict[str, str]:
     """Проверяет базу и Redis: бот ждёт этот ответ перед запуском."""
     async with app.state.pool.connection() as conn:

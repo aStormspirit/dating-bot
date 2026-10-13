@@ -64,16 +64,13 @@ async def set_idle(conn: AsyncConnection, peer: Peer) -> None:
 async def set_searching(conn: AsyncConnection, peer: Peer) -> None:
     await conn.execute(
         """
-        INSERT INTO chat_sessions (platform, bot_key, user_id, phase, generation, searching_since)
-        VALUES (%(platform)s, %(bot_key)s, %(user_id)s, 'searching', 1, NOW())
+        INSERT INTO chat_sessions (platform, bot_key, user_id, phase, searching_since)
+        VALUES (%(platform)s, %(bot_key)s, %(user_id)s, 'searching', NOW())
         ON CONFLICT (platform, bot_key, user_id) DO UPDATE SET
             phase = 'searching',
-            generation = chat_sessions.generation + 1,
             partner_id = NULL,
             partner_platform = NULL,
             partner_bot_key = NULL,
-            persona = NULL,
-            history = '[]'::jsonb,
             searching_since = NOW(),
             updated_at = NOW()
         """,
@@ -119,7 +116,7 @@ async def find_searcher(conn: AsyncConnection, exclude: Peer) -> Peer | None:
 
 
 async def touch_user(conn: AsyncConnection, peer: Peer) -> None:
-    """Запоминает пользователя. Пол и возраст не затирает."""
+    """Запоминает пользователя, если он пишет впервые."""
     await conn.execute(
         """
         INSERT INTO bot_users (platform, bot_key, user_id)

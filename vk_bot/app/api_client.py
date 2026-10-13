@@ -7,8 +7,8 @@ from typing import Any
 
 import httpx
 
-from vk_bot.config import CHAT_API_SERVICE_TOKEN, CHAT_API_URL
-from vk_bot.peer import Peer
+from app.config import CHAT_API_SERVICE_TOKEN, CHAT_API_URL
+from app.peer import Peer
 
 
 class ChatApiError(Exception):

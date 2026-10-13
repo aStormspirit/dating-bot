@@ -2,7 +2,7 @@
 
 import requests
 
-from vk_bot.config import API_VERSION
+from app.config import API_VERSION
 
 
 def rebuild_vkbottle_response_models() -> None:
@@ -65,13 +65,11 @@ def preflight_check(token: str) -> int:
             f"  3. Ключи доступа → НОВЫЙ ключ с правами:\n"
             f"       • Сообщения сообщества\n"
             f"       • Управление сообществом\n"
-            f"  4. Вставьте новый ключ в .env без кавычек\n"
-            f"  5. Для подробностей: python diagnose.py"
+            f"  4. Вставьте новый ключ в .env без кавычек"
         )
 
     ensure_incoming_events(token, group_id)
     ensure_bot_capabilities(token, group_id)
-    check_photo_access(token)
     return group_id
 
 
@@ -142,33 +140,3 @@ def ensure_bot_capabilities(token: str, group_id: int) -> None:
         )
         return
     print(f"Возможности ботов включены (group_id={group_id}).")
-
-
-def check_photo_access(token: str) -> None:
-    """Пишет в лог, может ли ключ загружать фото. Без этого права картинка не уйдёт."""
-    response = requests.get(
-        "https://api.vk.com/method/photos.getMessagesUploadServer",
-        params={"access_token": token, "peer_id": 1, "v": API_VERSION},
-        timeout=15,
-    ).json()
-    if "error" not in response:
-        print("OK: photos.getMessagesUploadServer доступен, картинки можно отправлять.")
-        return
-
-    err = response["error"]
-    code = err.get("error_code")
-    # 15 и 27 — у ключа нет права photos. Остальные коды значат, что метод уже доступен,
-    # а тестовый peer_id=1 просто не является диалогом с ботом.
-    if code not in {15, 27}:
-        print(
-            "OK: право photos есть. "
-            f"Тестовый вызов вернул VK Error [{code}] subcode={err.get('error_subcode')}: "
-            f"{err.get('error_msg')}."
-        )
-        return
-
-    print(
-        "Нет права загружать фото. "
-        f"VK Error [{code}] subcode={err.get('error_subcode')}: {err.get('error_msg')}. "
-        "Нужен новый ключ сообщества с правом «Фотографии»."
-    )

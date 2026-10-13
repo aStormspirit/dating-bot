@@ -11,12 +11,12 @@ LeftReason = Literal["stopped", "reported", "undeliverable"]
 
 
 class StateOut(BaseModel):
-    phase: Phase
+    phase: Phase = Field(description="`idle` — вне чата, `searching` — в очереди, `chatting` — в диалоге")
 
 
 class StopOut(BaseModel):
     phase: Phase = "idle"
-    was_active: bool
+    was_active: bool = Field(description="Был ли поиск или диалог до остановки")
 
 
 class MessageIn(BaseModel):
@@ -24,7 +24,7 @@ class MessageIn(BaseModel):
 
 
 class MessageOut(BaseModel):
-    delivered: bool
+    delivered: bool = Field(description="Сообщение передано собеседнику")
     phase: Phase
 
 
@@ -32,5 +32,5 @@ class ChatEvent(BaseModel):
     """Событие для второй стороны. Инициатор узнаёт итог из HTTP-ответа."""
 
     type: Literal["partner_found", "message", "partner_left"]
-    text: str | None = None
-    reason: LeftReason | None = None
+    text: str | None = Field(None, description="Текст для `message`")
+    reason: LeftReason | None = Field(None, description="Причина для `partner_left`")

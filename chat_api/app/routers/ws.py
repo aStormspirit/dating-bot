@@ -17,7 +17,13 @@ def _bearer_token(websocket: WebSocket) -> str | None:
 
 @router.websocket("/events/web")
 async def web_events(websocket: WebSocket) -> None:
-    """Все события пользователей сайта. Приложение само раздаёт их по своим пользователям."""
+    """Все события пользователей сайта. Приложение само раздаёт их по своим пользователям.
+
+    Требует заголовок `Authorization: Bearer <токен приложения>`, иначе
+    соединение закрывается с кодом 1008. Сервер только отправляет JSON
+    `{"to": {"platform", "bot_key", "user_id"}, "type", "text"?, "reason"?}`,
+    входящие сообщения клиента игнорируются.
+    """
     if identify_client(_bearer_token(websocket), get_settings()) != "app":
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return

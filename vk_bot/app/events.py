@@ -1,4 +1,4 @@
-"""Доставка событий Chat API в ВК и Telegram из Redis Streams."""
+"""Доставка событий Chat API в ВК из Redis Streams."""
 
 from __future__ import annotations
 
@@ -8,36 +8,31 @@ import json
 from redis.asyncio import Redis
 from redis.exceptions import ResponseError
 
-from vk_bot.api_client import ChatApiError, chat_api
-from vk_bot.config import EVENTS_CONSUMER, REDIS_URL
-from vk_bot.gateway import gateway
-from vk_bot.peer import Peer
-from vk_bot.ui import FOUND_TEXT, PARTNER_LEFT_TEXT, UNDELIVERED_TEXT, format_partner
+from app.api_client import ChatApiError, chat_api
+from app.config import EVENTS_CONSUMER, REDIS_URL
+from app.gateway import gateway
+from app.peer import Peer
+from app.ui import FOUND_TEXT, PARTNER_LEFT_TEXT, UNDELIVERED_TEXT, format_partner
 
 _GROUP = "bots"
-_PLATFORMS = ("vk", "tg")
+_STREAM = "chat:events:vk"
 _PENDING = "0"
 _NEW = ">"
 _BLOCK_MS = 5000
 
 
-def _stream(platform: str) -> str:
-    return f"chat:events:{platform}"
-
-
-async def _ensure_groups(redis: Redis) -> None:
-    for platform in _PLATFORMS:
-        try:
-            await redis.xgroup_create(_stream(platform), _GROUP, id="$", mkstream=True)
-        except ResponseError as exc:
-            if "BUSYGROUP" not in str(exc):
-                raise
+async def _ensure_group(redis: Redis) -> None:
+    try:
+        await redis.xgroup_create(_STREAM, _GROUP, id="$", mkstream=True)
+    except ResponseError as exc:
+        if "BUSYGROUP" not in str(exc):
+            raise
 
 
 async def _deliver(body: dict) -> None:
-    """Шлёт событие адресату. Если мессенджер не принял, API закрывает его диалог."""
+    """Шлёт событие адресату. Если ВК не принял, API закрывает его диалог."""
     to = body["to"]
-    peer = Peer(to["platform"], str(to["bot_key"]), int(to["user_id"]))
+    peer = Peer(str(to["bot_key"]), int(to["user_id"]))
     kind = body.get("type")
     if kind == "partner_found":
         delivered = await gateway.send(peer, FOUND_TEXT, "chat")
@@ -76,9 +71,9 @@ async def consume_events() -> None:
         socket_connect_timeout=5,
     )
     try:
-        await _ensure_groups(redis)
-        cursors = {_stream(platform): _PENDING for platform in _PLATFORMS}
-        print(f"Читаю события Chat API: {', '.join(cursors)}", flush=True)
+        await _ensure_group(redis)
+        cursors = {_STREAM: _PENDING}
+        print(f"Читаю события Chat API: {_STREAM}", flush=True)
         while True:
             try:
                 batches = await redis.xreadgroup(_GROUP, EVENTS_CONSUMER, cursors, count=50, block=_BLOCK_MS)

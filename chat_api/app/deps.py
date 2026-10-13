@@ -61,9 +61,9 @@ CurrentClient = Annotated[Client, Depends(current_client)]
 
 
 def service_peer(
-    platform: Annotated[Literal["vk", "tg", "web"], Path()],
-    bot_key: Annotated[str, Path(min_length=1, max_length=64)],
-    user_id: Annotated[int, Path(gt=0)],
+    platform: Annotated[Literal["vk", "tg", "web"], Path(description="Платформа пользователя")],
+    bot_key: Annotated[str, Path(min_length=1, max_length=64, description="Бот или сайт, через который пишет пользователь")],
+    user_id: Annotated[int, Path(gt=0, description="ID пользователя на платформе")],
     client: CurrentClient,
 ) -> Peer:
     """Клиент действует от имени пользователя только своей платформы."""

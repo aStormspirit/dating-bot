@@ -1,6 +1,6 @@
-# Chat API, бот ВК и Telegram, Redis, база Supabase Postgres и локальная панель Studio.
+# Chat API, бот ВК, Redis, база Supabase Postgres и локальная панель Studio.
 # Локально: docker compose up --build
-# На сервере CI подставляет BOT_IMAGE, CHAT_API_IMAGE и PREMIUM_IMAGE из Docker Hub, сборки нет.
+# На сервере CI подставляет BOT_IMAGE и CHAT_API_IMAGE из Docker Hub, сборки нет.
 # Chat API: http://127.0.0.1:8000/docs
 # На сервере Studio и Chat API открыты наружу только через cloudflared (профиль proxy).
 # Studio: http://127.0.0.1:54323
@@ -83,16 +83,18 @@ services:
       retries: 5
       start_period: 20s
 
+  # Бот ВК: отдельный контейнер, с Chat API общается только по HTTP и через Redis Streams.
   bot:
     image: ${BOT_IMAGE:-dating-bot:local}
-    build: .
+    build: ./vk_bot
     container_name: vk-bot
     restart: unless-stopped
-    env_file: .env
     environment:
+      VK_TOKEN: ${VK_TOKEN:-}
+      VK_TOKENS: ${VK_TOKENS:-}
+      CHAT_API_SERVICE_TOKEN: ${CHAT_API_SERVICE_TOKEN:?Задайте CHAT_API_SERVICE_TOKEN в .env}
       CHAT_API_URL: http://chat-api:8000
       REDIS_URL: redis://redis:6379/0
-      PREMIUM_URL: ${PREMIUM_URL:-https://vk.cc/d2HjY8}
     depends_on:
       chat-api:
         condition: service_healthy
@@ -147,58 +149,6 @@ services:
       - ./supabase/studio/snippets:/app/snippets
       - ./supabase/studio/functions:/app/edge-functions:ro
 
-  premium:
-    image: ${PREMIUM_IMAGE:-dating-premium:local}
-    build: ./premium_site
-    container_name: vk-premium-web
-    restart: unless-stopped
-    ports:
-      - "${PREMIUM_PUBLISH:-127.0.0.1:8080}:8000"
-    environment:
-      DATABASE_URL: postgresql://supabase_admin:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-postgres}
-    depends_on:
-      db:
-        condition: service_healthy
-
-  # Публичный gateway для сайта: держит APP token, проксирует web peers и /events/web.
-  # Chat API остаётся на loopback / Cloudflare Access; браузер ходит только сюда.
-  web-gateway:
-    image: ${WEB_GATEWAY_IMAGE:-dating-web-gateway:local}
-    build: ./web_gateway
-    container_name: vk-web-gateway
-    restart: unless-stopped
-    ports:
-      - "${WEB_GATEWAY_PUBLISH:-127.0.0.1:8001}:8000"
-    environment:
-      CHAT_API_URL: http://chat-api:8000
-      CHAT_API_APP_TOKEN: ${CHAT_API_APP_TOKEN:?Задайте CHAT_API_APP_TOKEN в .env}
-      GUEST_JWT_SECRET: ${GUEST_JWT_SECRET:?Задайте GUEST_JWT_SECRET в .env}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,https://chatwithyou.site}
-      WEB_BOT_KEY: ${WEB_BOT_KEY:-site}
-    depends_on:
-      chat-api:
-        condition: service_healthy
-
-  caddy:
-    image: caddy:2.10
-    container_name: vk-bot-caddy
-    profiles: ["proxy"]
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    environment:
-      PAY_HOST: ${PAY_HOST:-pay.chatwithyou.site}
-      API_HOST: ${API_HOST:-api.chatwithyou.site}
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - premium
-      - web-gateway
-
   # Studio и Chat API доступны снаружи только через Cloudflare Tunnel под Cloudflare Access.
   # Адреса и правила входа настроены в Cloudflare, контейнеру нужен только токен туннеля.
   cloudflared:
@@ -216,5 +166,3 @@ services:
 volumes:
   supabase_data:
   redis_data:
-  caddy_data:
-  caddy_config:
