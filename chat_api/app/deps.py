@@ -9,14 +9,16 @@ from fastapi import Depends, HTTPException, Path, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import Settings, get_settings
-from app.peer import Peer
+from app.peer import ENGINE_PLATFORM, ENGINE_USER_ID, Peer
 from app.services.chat import ChatService
 
-Client = Literal["bot", "app"]
+Client = Literal["bot", "app", "engine"]
 # Бот ВК и Telegram не может действовать от имени пользователей сайта и наоборот.
+# engine_bridge действует только от имени аккаунтов chat-engine.
 CLIENT_PLATFORMS: dict[Client, frozenset[str]] = {
     "bot": frozenset({"vk", "tg"}),
     "app": frozenset({"web"}),
+    "engine": frozenset({ENGINE_PLATFORM}),
 }
 
 _bearer = HTTPBearer(auto_error=False)
@@ -43,6 +45,8 @@ def identify_client(token: str | None, settings: Settings) -> Client | None:
         return "bot"
     if _matches(token, settings.chat_api_app_token):
         return "app"
+    if settings.chat_api_engine_token and _matches(token, settings.chat_api_engine_token):
+        return "engine"
     return None
 
 
@@ -61,8 +65,10 @@ CurrentClient = Annotated[Client, Depends(current_client)]
 
 
 def service_peer(
-    platform: Annotated[Literal["vk", "tg", "web"], Path(description="Платформа пользователя")],
-    bot_key: Annotated[str, Path(min_length=1, max_length=64, description="Бот или сайт, через который пишет пользователь")],
+    platform: Annotated[Literal["vk", "tg", "web", "engine"], Path(description="Платформа пользователя")],
+    bot_key: Annotated[
+        str, Path(min_length=1, max_length=64, description="Бот или сайт, через который пишет пользователь")
+    ],
     user_id: Annotated[int, Path(gt=0, description="ID пользователя на платформе")],
     client: CurrentClient,
 ) -> Peer:
@@ -73,3 +79,27 @@ def service_peer(
 
 
 ServicePeer = Annotated[Peer, Depends(service_peer)]
+
+
+def human_peer(peer: ServicePeer) -> Peer:
+    """Встать в общую очередь может только человек: аккаунту chat-engine пару даёт attach."""
+    if peer.is_engine:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Аккаунт chat-engine ищет через /engine/{account}/hunt")
+    return peer
+
+
+HumanPeer = Annotated[Peer, Depends(human_peer)]
+
+
+def require_engine(client: CurrentClient) -> None:
+    if client != "engine":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Нужен токен engine_bridge")
+
+
+def engine_peer(
+    account: Annotated[str, Path(min_length=1, max_length=64, description="ID аккаунта в chat-engine")],
+) -> Peer:
+    return Peer(ENGINE_PLATFORM, account, ENGINE_USER_ID)
+
+
+EnginePeer = Annotated[Peer, Depends(engine_peer)]

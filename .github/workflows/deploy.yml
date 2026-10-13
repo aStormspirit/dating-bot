@@ -44,6 +44,8 @@ jobs:
           user=$(printf '%s' "$DOCKERHUB_USERNAME" | tr '[:upper:]' '[:lower:]')
           echo "bot_image=${user}/dating-bot:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
           echo "chat_api_image=${user}/dating-chat-api:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "tg_bot_image=${user}/dating-tg-bot:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "engine_bridge_image=${user}/dating-engine-bridge:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -75,6 +77,26 @@ jobs:
           cache-from: type=gha,scope=chat-api
           cache-to: type=gha,scope=chat-api,mode=max
 
+      - name: Push Telegram bot image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./tg_bot
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.images.outputs.tg_bot_image }}
+          cache-from: type=gha,scope=tg-bot
+          cache-to: type=gha,scope=tg-bot,mode=max
+
+      - name: Push engine bridge image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./engine_bridge
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.images.outputs.engine_bridge_image }}
+          cache-from: type=gha,scope=engine-bridge
+          cache-to: type=gha,scope=engine-bridge,mode=max
+
   deploy:
     needs: publish
     runs-on: ubuntu-latest
@@ -98,13 +120,15 @@ jobs:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           CHAT_API_APP_TOKEN: ${{ secrets.CHAT_API_APP_TOKEN }}
           CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ENGINE_TOKEN: ${{ secrets.CHAT_ENGINE_TOKEN }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT || 22 }}
           command_timeout: 30m
-          envs: DEPLOY_PATH,ENV_FILE_B64,GIT_SHA,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,CHAT_API_APP_TOKEN,CLOUDFLARE_TUNNEL_TOKEN
+          envs: DEPLOY_PATH,ENV_FILE_B64,GIT_SHA,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,CHAT_API_APP_TOKEN,CLOUDFLARE_TUNNEL_TOKEN,TELEGRAM_BOT_TOKEN,CHAT_ENGINE_TOKEN
           script: |
             set -eu
             if [ -n "${DEPLOY_PATH:-}" ]; then
@@ -115,6 +139,8 @@ jobs:
             hub_user=$(printf '%s' "$DOCKERHUB_USERNAME" | tr '[:upper:]' '[:lower:]')
             export BOT_IMAGE="${hub_user}/dating-bot:${GIT_SHA}"
             export CHAT_API_IMAGE="${hub_user}/dating-chat-api:${GIT_SHA}"
+            export TG_BOT_IMAGE="${hub_user}/dating-tg-bot:${GIT_SHA}"
+            export ENGINE_BRIDGE_IMAGE="${hub_user}/dating-engine-bridge:${GIT_SHA}"
             if [ ! -d "$APP_DIR/.git" ]; then
               mkdir -p "$(dirname "$APP_DIR")"
               git clone https://github.com/aStormspirit/dating-bot.git "$APP_DIR"

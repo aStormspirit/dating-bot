@@ -35,6 +35,7 @@ ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS searching_since TIMESTAMPTZ;
 ALTER TABLE bot_users ADD COLUMN IF NOT EXISTS platform TEXT NOT NULL DEFAULT 'vk';
 ALTER TABLE bot_users ADD COLUMN IF NOT EXISTS bot_key TEXT NOT NULL DEFAULT '';
 ALTER TABLE bot_users ADD COLUMN IF NOT EXISTS search_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE bot_users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 DO $$
 BEGIN
@@ -68,6 +69,10 @@ CREATE INDEX IF NOT EXISTS chat_sessions_queue_idx
     ON chat_sessions (searching_since)
     WHERE phase = 'searching' AND searching_since IS NOT NULL;
 
+CREATE INDEX IF NOT EXISTS bot_users_last_seen_idx ON bot_users (last_seen_at);
+
 COMMENT ON COLUMN chat_sessions.partner_id IS 'С кем пользователь сейчас говорит';
 COMMENT ON COLUMN chat_sessions.searching_since IS 'Когда пользователь встал в очередь поиска';
 COMMENT ON COLUMN bot_users.search_count IS 'Сколько раз запускал поиск собеседника';
+COMMENT ON COLUMN bot_users.last_seen_at IS 'Последнее сообщение или поиск: по нему считается онлайн';
+COMMENT ON COLUMN chat_sessions.platform IS 'vk, tg, web или engine — аккаунт chat-engine вместо живого собеседника';

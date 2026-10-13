@@ -1,8 +1,8 @@
 """События для второй стороны диалога через Redis Streams.
 
-Поток на платформу: `chat:events:vk`, `chat:events:tg`, `chat:events:web`.
-Боты читают свои потоки группой потребителей, поток сайта читает сам API
-и отдаёт серверному приложению по WebSocket.
+Поток на платформу: `chat:events:vk`, `chat:events:tg`, `chat:events:web`, `chat:events:engine`.
+Боты и engine_bridge читают свои потоки группой потребителей, поток сайта читает
+сам API и отдаёт серверному приложению по WebSocket.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import logging
 from fastapi import WebSocket
 from redis.asyncio import Redis
 
-from app.peer import Peer
+from app.peer import ENGINE_PLATFORM, Peer
 from app.schemas import ChatEvent
 
 logger = logging.getLogger(__name__)
@@ -38,15 +38,22 @@ class EventBus:
 
     async def publish(self, recipient: Peer, event: ChatEvent) -> None:
         body = {"to": recipient.as_dict(), **event.model_dump(exclude_none=True)}
+        await self._add(stream_name(recipient.platform), body, f"{event.type} для {recipient}")
+
+    async def request_engine(self) -> None:
+        """Человек остался в очереди один: engine_bridge сразу запускает поиск в chat-engine."""
+        await self._add(stream_name(ENGINE_PLATFORM), {"type": "demand"}, "demand")
+
+    async def _add(self, stream: str, body: dict, label: str) -> None:
         try:
             await self._redis.xadd(
-                stream_name(recipient.platform),
+                stream,
                 {"data": json.dumps(body, ensure_ascii=False)},
                 maxlen=self._maxlen,
                 approximate=True,
             )
         except Exception:
-            logger.exception("Не опубликовал событие %s для %s", event.type, recipient)
+            logger.exception("Не опубликовал событие %s", label)
 
 
 class WebSocketHub:

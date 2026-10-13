@@ -34,3 +34,29 @@ class ChatEvent(BaseModel):
     type: Literal["partner_found", "message", "partner_left"]
     text: str | None = Field(None, description="Текст для `message`")
     reason: LeftReason | None = Field(None, description="Причина для `partner_left`")
+
+
+class EngineDemandOut(BaseModel):
+    waiting: int = Field(description="Людей в очереди дольше порога подбора бота")
+    hunting: int = Field(description="Аккаунтов chat-engine, которые уже ищут собеседника")
+
+
+class EngineAttachOut(BaseModel):
+    attached: bool = Field(description="Аккаунт chat-engine связан с ждущим человеком")
+    phase: Phase = Field(description="Фаза аккаунта chat-engine после вызова")
+
+
+class PresenceOut(BaseModel):
+    online: int = Field(description="В поиске, в диалоге или писали за последние минуты")
+    searching: int
+    chatting: int
+
+
+class StatsOut(BaseModel):
+    """Счётчики для сайта. Общие числа включают аккаунты chat-engine."""
+
+    online: int
+    searching: int
+    chatting: int
+    humans: PresenceOut
+    bots: PresenceOut

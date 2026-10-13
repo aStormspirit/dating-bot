@@ -9,8 +9,8 @@ if [ -z "${GIT_SHA:-}" ]; then
   echo "Не задан GIT_SHA." >&2
   exit 1
 fi
-if [ -z "${BOT_IMAGE:-}" ] || [ -z "${CHAT_API_IMAGE:-}" ]; then
-  echo "Не заданы BOT_IMAGE и CHAT_API_IMAGE." >&2
+if [ -z "${BOT_IMAGE:-}" ] || [ -z "${CHAT_API_IMAGE:-}" ] || [ -z "${TG_BOT_IMAGE:-}" ] || [ -z "${ENGINE_BRIDGE_IMAGE:-}" ]; then
+  echo "Не заданы BOT_IMAGE, CHAT_API_IMAGE, TG_BOT_IMAGE и ENGINE_BRIDGE_IMAGE." >&2
   exit 1
 fi
 
@@ -124,8 +124,8 @@ ensure_secret() {
 }
 
 # Ключ, который знает не только сервер: из отдельного секрета GitHub, из ENV_FILE или из .env.
-# Без него деплой останавливается.
-require_secret() {
+# Код возврата 1, если его нет нигде.
+optional_secret() {
   key=$1
   eval "value=\${$key:-}"
   if [ -z "$value" ]; then
@@ -135,10 +135,17 @@ require_secret() {
     value=$(sed -n "s/^${key}=//p" .env | tail -n 1)
   fi
   if [ -z "$value" ]; then
-    echo "Добавьте ${key} в секрет ENV_FILE." >&2
-    exit 1
+    return 1
   fi
   set_env "$key" "$value"
+}
+
+# То же, но без ключа деплой останавливается.
+require_secret() {
+  if ! optional_secret "$1"; then
+    echo "Добавьте $1 в секреты GitHub или в секрет ENV_FILE." >&2
+    exit 1
+  fi
 }
 
 drop_env() {
@@ -151,6 +158,27 @@ drop_env() {
 ensure_secret CHAT_API_SERVICE_TOKEN
 require_secret CHAT_API_APP_TOKEN
 require_secret CLOUDFLARE_TUNNEL_TOKEN
+
+# Бот Telegram и мост к chat-engine запускаются, только если для них есть токены.
+profiles=proxy
+optional_services=""
+if optional_secret TELEGRAM_BOT_TOKEN; then
+  profiles="${profiles},telegram"
+  optional_services="${optional_services} tg-bot"
+else
+  echo "Нет TELEGRAM_BOT_TOKEN: бот Telegram не запускается."
+  docker rm -f vk-tg-bot >/dev/null 2>&1 || true
+fi
+if optional_secret CHAT_ENGINE_TOKEN; then
+  ensure_secret CHAT_API_ENGINE_TOKEN
+  profiles="${profiles},engine"
+  optional_services="${optional_services} engine-bridge"
+else
+  echo "Нет CHAT_ENGINE_TOKEN: собеседники из chat-engine не подключаются."
+  drop_env CHAT_API_ENGINE_TOKEN
+  docker rm -f vk-engine-bridge >/dev/null 2>&1 || true
+fi
+export COMPOSE_PROFILES="$profiles"
 for stale in STUDIO_HOST PAY_HOST API_HOST CORS_ORIGINS PREMIUM_URL PREMIUM_PUBLISH WEB_GATEWAY_PUBLISH WEB_GATEWAY_IMAGE; do
   drop_env "$stale"
 done
@@ -164,14 +192,20 @@ if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
   printf '%s' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
 fi
 
-docker compose --profile proxy pull
+docker compose pull
 docker logout >/dev/null 2>&1 || true
-docker compose --profile proxy up -d --no-build --remove-orphans db redis
-docker compose --profile proxy up -d --no-build --remove-orphans --force-recreate chat-api
-docker compose --profile proxy up -d --no-build --remove-orphans --force-recreate bot
-docker compose --profile proxy up -d --no-build --remove-orphans studio meta cloudflared
+docker compose up -d --no-build --remove-orphans db redis
+docker compose up -d --no-build --remove-orphans --force-recreate chat-api
+# shellcheck disable=SC2086 # список сервисов разделён пробелами
+docker compose up -d --no-build --remove-orphans --force-recreate bot $optional_services
+docker compose up -d --no-build --remove-orphans studio meta cloudflared
 sleep 12
 docker logs vk-bot-cloudflared --tail 20 2>&1 | grep -E "Registered tunnel connection|ERR|error" || true
 docker logs vk-chat-api --tail 40 2>&1 | grep -E "Схема базы|Application startup|ERROR|Traceback" || true
 docker logs vk-bot --tail 80 2>&1 | grep -E "Токенов ВК|VK:|Chat API|События|пропущен|Нет доступа|Токен невалиден|Бот запущен|Ошибка запуска|VK Error|Traceback" || true
+for name in vk-tg-bot vk-engine-bridge; do
+  if docker inspect "$name" >/dev/null 2>&1; then
+    docker logs "$name" --tail 30 2>&1 | grep -E "Бот @|Chat API|Аккаунт|Читаю|Не задан|WARNING|ERROR|Traceback" || true
+  fi
+done
 docker image prune -af

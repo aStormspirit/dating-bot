@@ -2,18 +2,34 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 
+from app.config import Settings
 from app.events import EventBus
 from app.peer import Peer
 from app.repositories import sessions as repo
-from app.schemas import ChatEvent, LeftReason, MessageOut, Phase, StateOut, StopOut
+from app.schemas import (
+    ChatEvent,
+    EngineAttachOut,
+    EngineDemandOut,
+    LeftReason,
+    MessageOut,
+    Phase,
+    PresenceOut,
+    StateOut,
+    StatsOut,
+    StopOut,
+)
 
 Outbox = list[tuple[Peer, ChatEvent]]
+
+# Счётчики для сайта не обязаны быть точными до секунды, а запрос считает всю таблицу.
+_STATS_TTL_SECONDS = 5.0
 
 
 class NotChattingError(Exception):
@@ -23,9 +39,13 @@ class NotChattingError(Exception):
 class ChatService:
     """Все изменения пар идут под одной блокировкой, события уходят после коммита."""
 
-    def __init__(self, pool: AsyncConnectionPool, events: EventBus) -> None:
+    def __init__(self, pool: AsyncConnectionPool, events: EventBus, settings: Settings) -> None:
         self._pool = pool
         self._events = events
+        self._engine_enabled = settings.engine_enabled
+        self._fallback_after = settings.engine_fallback_after_seconds
+        self._online_window = settings.stats_online_window_seconds
+        self._stats: tuple[float, StatsOut] | None = None
 
     @asynccontextmanager
     async def _locked(self) -> AsyncIterator[AsyncConnection]:
@@ -73,6 +93,8 @@ class ChatService:
                 outbox.append((other, ChatEvent(type="partner_found")))
                 phase = "chatting"
         await self._flush(outbox)
+        if phase == "searching" and self._engine_enabled:
+            await self._events.request_engine()
         return StateOut(phase=phase)
 
     async def visit(self, peer: Peer) -> None:
@@ -125,3 +147,64 @@ class ChatService:
         async with self._locked() as conn:
             await self._detach(conn, peer, "undeliverable", outbox)
         await self._flush(outbox)
+
+    async def engine_demand(self) -> EngineDemandOut:
+        async with self._pool.connection() as conn:
+            waiting, hunting = await repo.engine_demand(conn, self._fallback_after)
+        return EngineDemandOut(waiting=waiting, hunting=hunting)
+
+    async def engine_hunt(self, engine: Peer) -> StateOut:
+        """Аккаунт chat-engine начал поиск. В общую очередь он не попадает, пару ему даёт attach."""
+        outbox: Outbox = []
+        async with self._locked() as conn:
+            await self._detach(conn, engine, "stopped", outbox)
+            await repo.set_searching(conn, engine)
+        await self._flush(outbox)
+        return StateOut(phase="searching")
+
+    async def engine_attach(self, engine: Peer) -> EngineAttachOut:
+        """chat-engine нашёл собеседника: отдаёт его человеку, который ждёт дольше всех.
+
+        Если за это время все ждущие нашли живых собеседников, аккаунт снимается с поиска
+        и `attached=false`: engine_bridge закрывает разговор в chat-engine.
+        """
+        outbox: Outbox = []
+        async with self._locked() as conn:
+            session = await repo.get_session(conn, engine)
+            if session is None or session.phase != "searching":
+                return EngineAttachOut(attached=False, phase=session.phase if session else "idle")
+            human = await repo.oldest_waiting_human(conn, self._fallback_after)
+            if human is None:
+                await repo.set_idle(conn, engine)
+                return EngineAttachOut(attached=False, phase="idle")
+            await repo.set_chatting(conn, engine, human)
+            await repo.set_chatting(conn, human, engine)
+            outbox.append((human, ChatEvent(type="partner_found")))
+        await self._flush(outbox)
+        return EngineAttachOut(attached=True, phase="chatting")
+
+    async def stats(self) -> StatsOut:
+        now = time.monotonic()
+        if self._stats is not None and now - self._stats[0] < _STATS_TTL_SECONDS:
+            return self._stats[1]
+        async with self._pool.connection() as conn:
+            row = await repo.presence_stats(conn, self._online_window)
+        humans = PresenceOut(
+            online=row["humans_online"],
+            searching=row["humans_searching"],
+            chatting=row["humans_chatting"],
+        )
+        bots = PresenceOut(
+            online=row["bots_online"],
+            searching=row["bots_searching"],
+            chatting=row["bots_chatting"],
+        )
+        stats = StatsOut(
+            online=humans.online + bots.online,
+            searching=humans.searching + bots.searching,
+            chatting=humans.chatting + bots.chatting,
+            humans=humans,
+            bots=bots,
+        )
+        self._stats = (now, stats)
+        return stats
