@@ -253,6 +253,13 @@ async def attach_start_buttons(api: Any, bot_key: str) -> None:
             break
 
 
+def cancel_search_timeout(peer: Peer) -> None:
+    """С поиска уже сняли: найден собеседник или диалог закончен."""
+    previous = _search_timeouts.pop(peer, None)
+    if previous is not None:
+        previous.cancel()
+
+
 async def _leave_queue_later(peer: Peer) -> None:
     """Через SEARCH_TIMEOUT_SECONDS снимает с поиска, если пара так и не нашлась."""
     try:
@@ -274,9 +281,7 @@ async def connect_with_partner(peer: Peer) -> None:
     """Ставит в поиск. Второй стороне о паре и прежнему собеседнику об уходе пишет Chat API."""
     phase = await chat_api.search(peer)
     await gateway.send(peer, SEARCHING_TEXT, "chat")
-    previous = _search_timeouts.pop(peer, None)
-    if previous is not None:
-        previous.cancel()
+    cancel_search_timeout(peer)
     if phase == "chatting":
         await gateway.send(peer, FOUND_TEXT, "chat")
         return

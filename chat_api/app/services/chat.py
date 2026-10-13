@@ -67,16 +67,41 @@ class ChatService:
             return None
         return session.partner
 
+    async def _notify_left(
+        self,
+        conn: AsyncConnection,
+        other: Peer,
+        reason: LeftReason,
+        outbox: Outbox,
+        *,
+        skip: Peer,
+    ) -> None:
+        """Снимает собеседника и сообщает ему об уходе. Если у него ещё висит chat-engine — закрывает и его."""
+        session = await repo.get_session(conn, other)
+        extra = (
+            session.partner
+            if session is not None and session.partner is not None and session.partner != skip
+            else None
+        )
+        await repo.set_idle(conn, other)
+        outbox.append((other, ChatEvent(type="partner_left", reason=reason)))
+        if extra is not None:
+            await repo.set_idle(conn, extra)
+            outbox.append((extra, ChatEvent(type="partner_left", reason=reason)))
+
     async def _detach(self, conn: AsyncConnection, peer: Peer, reason: LeftReason, outbox: Outbox) -> bool:
-        """Снимает пользователя с поиска или диалога. True, если было что снимать."""
+        """Снимает пользователя с поиска или диалога. True, если было что снимать.
+
+        Сообщает собеседнику даже если связь в сессиях уже несимметрична: иначе
+        человек, которому нашли пару, не узнает, что второй нажал «Следующий».
+        """
         session = await repo.get_session(conn, peer)
         if session is None or session.phase == "idle":
             return False
-        partner = await self._linked_partner(conn, peer, session)
+        partner = session.partner if session.phase == "chatting" else None
         await repo.set_idle(conn, peer)
         if partner is not None:
-            await repo.set_idle(conn, partner)
-            outbox.append((partner, ChatEvent(type="partner_left", reason=reason)))
+            await self._notify_left(conn, partner, reason, outbox, skip=peer)
         return True
 
     async def _search(self, peer: Peer, left_reason: LeftReason) -> StateOut:
@@ -87,10 +112,19 @@ class ChatService:
             await repo.record_search(conn, peer)
             phase: Phase = "searching"
             other = await repo.find_searcher(conn, peer)
+            stolen = False
+            if other is None and not peer.is_engine:
+                paired = await repo.find_human_with_engine(conn)
+                if paired is not None:
+                    other, engine = paired
+                    await repo.set_idle(conn, engine)
+                    outbox.append((engine, ChatEvent(type="partner_left", reason="stopped")))
+                    stolen = True
             if other is not None:
                 await repo.set_chatting(conn, peer, other)
                 await repo.set_chatting(conn, other, peer)
-                outbox.append((other, ChatEvent(type="partner_found")))
+                if not stolen:
+                    outbox.append((other, ChatEvent(type="partner_found")))
                 phase = "chatting"
         await self._flush(outbox)
         if phase == "searching" and self._engine_enabled:

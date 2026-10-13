@@ -121,6 +121,32 @@ async def find_searcher(conn: AsyncConnection, exclude: Peer) -> Peer | None:
     return _peer(row) if row else None
 
 
+async def find_human_with_engine(conn: AsyncConnection) -> tuple[Peer, Peer] | None:
+    """Человек в диалоге с chat-engine, который дольше всех говорит с ботом.
+
+    Живой ищущий забирает его из пары с ботом: люди важнее аккаунтов chat-engine.
+    """
+    cursor = await conn.execute(
+        """
+        SELECT platform, bot_key, user_id, partner_platform, partner_bot_key, partner_id
+        FROM chat_sessions
+        WHERE phase = 'chatting'
+          AND platform <> %(engine)s
+          AND partner_platform = %(engine)s
+          AND partner_id IS NOT NULL
+        ORDER BY updated_at
+        LIMIT 1
+        """,
+        {"engine": ENGINE_PLATFORM},
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    human = _peer(row)
+    engine = Peer(row["partner_platform"], row["partner_bot_key"] or "", int(row["partner_id"]))
+    return human, engine
+
+
 async def oldest_waiting_human(conn: AsyncConnection, min_wait_seconds: float) -> Peer | None:
     """Человек, который ждёт в очереди дольше всех и не меньше min_wait_seconds."""
     cursor = await conn.execute(

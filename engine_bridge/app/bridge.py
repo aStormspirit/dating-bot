@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 from dataclasses import dataclass, field
 
 from app.chat_api import ChatApiClient, ChatApiError, NotChattingError
@@ -25,12 +26,33 @@ logger = logging.getLogger(__name__)
 
 _RECONNECT_DELAY_SECONDS = 3.0
 
+# Служебные фразы анонимного бота (@AnonRuBot и похожие). Их нельзя отдавать человеку.
+_PARTNER_LEFT_RE = re.compile(
+    r"закончил(?:а|и)? с вами связь|"
+    r"собеседник (?:покинул|вышел|отключ|закончил)|"
+    r"диалог (?:завершен|завершён|окончен)|"
+    r"partner left|chat (?:ended|stopped)",
+    re.IGNORECASE,
+)
+_ENGINE_SYSTEM_RE = re.compile(
+    r"хотите больше собеседников|"
+    r"оставьте мнение о вашем собеседнике|"
+    r"напишите\s*/search|"
+    r"анонимн\w+\s+чат|"
+    r"t\.me/anon|"
+    r"@anonim|"
+    r"@anonrusupport",
+    re.IGNORECASE,
+)
+
 
 @dataclass(eq=False)
 class AccountLink:
     id: str
     # Состояние в chat-engine. None, пока WebSocket не прислал snapshot.
     state: str | None = None
+    # После ухода собеседника в chat-engine ещё приходят реклама и опрос — их не пересылаем.
+    closing: bool = False
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     task: asyncio.Task[None] | None = None
 
@@ -136,10 +158,18 @@ class Bridge:
                 await self._on_state(link, state)
             return
         if kind == "message":
-            link.state = state
             message = event.get("message") or {}
-            if state == "chatting" and message.get("direction") == "in" and message.get("text"):
-                await self._forward_to_human(link, str(message["text"]))
+            text = str(message.get("text") or "")
+            incoming = message.get("direction") == "in" and bool(text)
+            if incoming and (_PARTNER_LEFT_RE.search(text) or _ENGINE_SYSTEM_RE.search(text)):
+                logger.info("Служебное сообщение chat-engine %s, человеку не отправляю", link.id)
+                await self._end_from_engine(link)
+                return
+            if incoming and link.closing:
+                return
+            link.state = state
+            if state == "chatting" and incoming:
+                await self._forward_to_human(link, text)
 
     async def _sync(self, link: AccountLink) -> None:
         """После (пере)подключения приводит Chat API и chat-engine к одному состоянию."""
@@ -151,7 +181,9 @@ class Bridge:
         logger.info("Аккаунт %s: chat-engine=%s, Chat API=%s", link.id, link.state, phase)
         if link.state == "idle":
             if phase != "idle":
-                await self._stop_human_side(link)
+                await self._end_from_engine(link)
+            else:
+                link.closing = False
             self.request_reconcile()
         elif link.state == "chatting" and phase == "searching":
             await self._on_state(link, "chatting")
@@ -160,6 +192,7 @@ class Bridge:
 
     async def _on_state(self, link: AccountLink, state: str | None) -> None:
         if state == "chatting":
+            link.closing = False
             try:
                 attached = await self._chat_api.attach(link.id)
             except ChatApiError as exc:
@@ -169,8 +202,17 @@ class Bridge:
             if not attached:
                 await self._stop_engine(link)
         elif state == "idle":
-            await self._stop_human_side(link)
-            self.request_reconcile()
+            await self._end_from_engine(link)
+
+    async def _end_from_engine(self, link: AccountLink) -> None:
+        """Собеседник в chat-engine ушёл: человеку только partner_left, служебные фразы не шлём."""
+        if link.closing and link.state == "idle":
+            return
+        link.closing = True
+        link.state = "idle"
+        await self._stop_human_side(link)
+        await self._stop_engine(link)
+        self.request_reconcile()
 
     async def _forward_to_human(self, link: AccountLink, text: str) -> None:
         try:
@@ -247,6 +289,7 @@ class Bridge:
                 logger.warning("chat-engine не начал поиск для %s: %s", link.id, exc)
                 await self._stop_human_side(link)
                 return
+            link.closing = False
             link.state = "searching"
             logger.info("Аккаунт %s ищет собеседника для очереди", link.id)
 
