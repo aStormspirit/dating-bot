@@ -1,35 +1,23 @@
-"""Доставка событий Chat API в Telegram из Redis Streams."""
+"""Доставка событий Chat API в Telegram. События идут по WebSocket `/api/v1/events/tg`."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+from urllib.parse import quote
 
-from redis.asyncio import Redis
-from redis.exceptions import ResponseError
+from websockets.asyncio.client import connect
 
 from app.api_client import ChatApiError, chat_api
-from app.config import EVENTS_CONSUMER, REDIS_URL
+from app.config import CHAT_API_URL, EVENTS_CONSUMER, chat_api_headers
 from app.gateway import gateway
 from app.peer import Peer
 from app.ui import FOUND_TEXT, PARTNER_LEFT_TEXT, UNDELIVERED_TEXT, format_partner
 
 logger = logging.getLogger(__name__)
 
-_GROUP = "bots"
-_STREAM = "chat:events:tg"
-_PENDING = "0"
-_NEW = ">"
-_BLOCK_MS = 5000
-
-
-async def _ensure_group(redis: Redis) -> None:
-    try:
-        await redis.xgroup_create(_STREAM, _GROUP, id="$", mkstream=True)
-    except ResponseError as exc:
-        if "BUSYGROUP" not in str(exc):
-            raise
+_RECONNECT_DELAY_SECONDS = 3.0
 
 
 async def _deliver(body: dict) -> None:
@@ -56,42 +44,32 @@ async def _deliver(body: dict) -> None:
         logger.warning("Не сообщил API о недоставке %s: %s", peer, exc)
 
 
-async def _handle(fields: dict) -> None:
+async def _handle(event: dict) -> None:
     try:
-        await _deliver(json.loads(fields["data"]))
+        await _deliver(event)
     except Exception:  # битое событие не должно стопорить очередь
-        logger.exception("Не обработал событие %r", fields)
+        logger.exception("Не обработал событие %r", event)
 
 
 async def consume_events() -> None:
-    """Сначала дочитывает события, не подтверждённые до перезапуска, потом ждёт новые."""
-    # Таймаут сокета длиннее блокирующего XREADGROUP, иначе чтение обрывается.
-    redis = Redis.from_url(
-        REDIS_URL,
-        decode_responses=True,
-        socket_timeout=_BLOCK_MS / 1000 + 10,
-        socket_connect_timeout=5,
-    )
-    try:
-        await _ensure_group(redis)
-        cursors = {_STREAM: _PENDING}
-        logger.info("Читаю события Chat API: %s", _STREAM)
-        while True:
-            try:
-                batches = await redis.xreadgroup(_GROUP, EVENTS_CONSUMER, cursors, count=50, block=_BLOCK_MS)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # noqa: BLE001 — Redis может перезапускаться
-                logger.warning("Не прочитал события: %s: %s", type(exc).__name__, exc)
-                await asyncio.sleep(1)
-                continue
-            for stream, entries in batches or []:
-                if not entries and cursors[stream] == _PENDING:
-                    cursors[stream] = _NEW
-                for entry_id, fields in entries:
-                    await _handle(fields)
-                    await redis.xack(stream, _GROUP, entry_id)
-                    if cursors[stream] != _NEW:
-                        cursors[stream] = entry_id
-    finally:
-        await redis.aclose()
+    """Держит WebSocket событий: каждое событие доставляется и подтверждается по порядку."""
+    url = f"{CHAT_API_URL.replace('http', 'ws', 1)}/api/v1/events/tg?consumer={quote(EVENTS_CONSUMER)}"
+    while True:
+        try:
+            async with connect(
+                url,
+                additional_headers=chat_api_headers(),
+                open_timeout=15,
+                ping_interval=20,
+                ping_timeout=20,
+            ) as socket:
+                logger.info("Читаю события Chat API: %s", url)
+                async for raw in socket:
+                    message = json.loads(raw)
+                    await _handle(message["event"])
+                    await socket.send(json.dumps({"ack": message["id"]}))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — обрыв или перезапуск Chat API
+            logger.warning("WebSocket событий: %s: %s", type(exc).__name__, exc)
+        await asyncio.sleep(_RECONNECT_DELAY_SECONDS)

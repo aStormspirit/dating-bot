@@ -1,18 +1,21 @@
 """События для второй стороны диалога через Redis Streams.
 
 Поток на платформу: `chat:events:vk`, `chat:events:tg`, `chat:events:web`, `chat:events:engine`.
-Боты и engine_bridge читают свои потоки группой потребителей, поток сайта читает
-сам API и отдаёт серверному приложению по WebSocket.
+Боты и engine_bridge читают свои потоки группой потребителей: напрямую из Redis или,
+с другого сервера, через WebSocket `/events/{platform}`. Поток сайта читает сам API
+и отдаёт серверному приложению по WebSocket.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 
-from fastapi import WebSocket
+from fastapi import WebSocket, WebSocketDisconnect
 from redis.asyncio import Redis
+from redis.exceptions import ResponseError
 
 from app.peer import ENGINE_PLATFORM, Peer
 from app.schemas import ChatEvent
@@ -20,6 +23,7 @@ from app.schemas import ChatEvent
 logger = logging.getLogger(__name__)
 
 STREAM_PREFIX = "chat:events:"
+BOTS_GROUP = "bots"
 _BLOCK_MS = 5000
 # Таймаут сокета должен быть длиннее блокирующего XREAD, иначе чтение обрывается.
 REDIS_SOCKET_TIMEOUT = _BLOCK_MS / 1000 + 10
@@ -54,6 +58,67 @@ class EventBus:
             )
         except Exception:
             logger.exception("Не опубликовал событие %s", label)
+
+
+class BotEventFeed:
+    """Поток событий бота по WebSocket от имени потребителя группы `bots`.
+
+    Сервер шлёт `{"id", "event"}`, клиент отвечает `{"ack": id}` после доставки.
+    Неподтверждённые события приходят снова при следующем подключении того же потребителя.
+    """
+
+    def __init__(self, redis: Redis, platform: str, consumer: str) -> None:
+        self._redis = redis
+        self._stream = stream_name(platform)
+        self._consumer = consumer
+
+    async def serve(self, websocket: WebSocket) -> None:
+        try:
+            await self._redis.xgroup_create(self._stream, BOTS_GROUP, id="$", mkstream=True)
+        except ResponseError as exc:
+            if "BUSYGROUP" not in str(exc):
+                raise
+        sender = asyncio.create_task(self._send(websocket))
+        try:
+            while True:
+                message = await websocket.receive_json()
+                entry_id = message.get("ack") if isinstance(message, dict) else None
+                if isinstance(entry_id, str):
+                    await self._redis.xack(self._stream, BOTS_GROUP, entry_id)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            sender.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await sender
+
+    async def _send(self, websocket: WebSocket) -> None:
+        """Сначала неподтверждённые события этого потребителя, потом новые."""
+        cursor = "0"
+        while True:
+            try:
+                batches = await self._redis.xreadgroup(
+                    BOTS_GROUP, self._consumer, {self._stream: cursor}, count=50, block=_BLOCK_MS
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Не прочитал %s, повтор через секунду", self._stream)
+                await asyncio.sleep(1)
+                continue
+            for _stream, entries in batches or []:
+                if not entries and cursor != ">":
+                    cursor = ">"
+                for entry_id, fields in entries:
+                    if cursor != ">":
+                        cursor = entry_id
+                    try:
+                        event = json.loads(fields["data"])
+                    except (KeyError, ValueError):
+                        logger.warning("Битое событие в %s: %r", self._stream, fields)
+                        await self._redis.xack(self._stream, BOTS_GROUP, entry_id)
+                        continue
+                    await websocket.send_json({"id": entry_id, "event": event})
 
 
 class WebSocketHub:

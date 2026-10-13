@@ -1,4 +1,4 @@
-"""Клиент Chat API: бот действует от имени своих пользователей по сервисному токену."""
+"""Клиент Chat API: бот действует от имени своих пользователей по токену бота Telegram."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from app.config import CHAT_API_SERVICE_TOKEN, CHAT_API_URL
+from app.config import CHAT_API_URL, chat_api_headers
 from app.peer import Peer
 
 
@@ -26,12 +26,8 @@ class SendResult:
 
 
 class ChatApiClient:
-    def __init__(self, base_url: str, token: str, *, timeout: float = 10.0) -> None:
-        self._http = httpx.AsyncClient(
-            base_url=f"{base_url.rstrip('/')}/api/v1",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=timeout,
-        )
+    def __init__(self, base_url: str, headers: dict[str, str], *, timeout: float = 10.0) -> None:
+        self._http = httpx.AsyncClient(base_url=f"{base_url}/api/v1", headers=headers, timeout=timeout)
 
     async def aclose(self) -> None:
         await self._http.aclose()
@@ -72,4 +68,4 @@ class ChatApiClient:
         await self._request("POST", peer, "delivery-failed")
 
 
-chat_api = ChatApiClient(CHAT_API_URL, CHAT_API_SERVICE_TOKEN)
+chat_api = ChatApiClient(CHAT_API_URL, chat_api_headers())

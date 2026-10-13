@@ -12,11 +12,13 @@ from app.config import Settings, get_settings
 from app.peer import ENGINE_PLATFORM, ENGINE_USER_ID, Peer
 from app.services.chat import ChatService
 
-Client = Literal["bot", "app", "engine"]
+Client = Literal["bot", "tg_bot", "app", "engine"]
 # Бот ВК и Telegram не может действовать от имени пользователей сайта и наоборот.
-# engine_bridge действует только от имени аккаунтов chat-engine.
+# Бот Telegram на отдельном сервере — только за пользователей tg,
+# engine_bridge — только за аккаунты chat-engine.
 CLIENT_PLATFORMS: dict[Client, frozenset[str]] = {
     "bot": frozenset({"vk", "tg"}),
+    "tg_bot": frozenset({"tg"}),
     "app": frozenset({"web"}),
     "engine": frozenset({ENGINE_PLATFORM}),
 }
@@ -47,6 +49,8 @@ def identify_client(token: str | None, settings: Settings) -> Client | None:
         return "app"
     if settings.chat_api_engine_token and _matches(token, settings.chat_api_engine_token):
         return "engine"
+    if settings.chat_api_tg_token and _matches(token, settings.chat_api_tg_token):
+        return "tg_bot"
     return None
 
 

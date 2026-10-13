@@ -1,6 +1,7 @@
-# Chat API, боты ВК и Telegram, мост к chat-engine, Redis, база Supabase Postgres и панель Studio.
+# Chat API, бот ВК, мост к chat-engine, Redis, база Supabase Postgres и панель Studio.
+# Бот Telegram на проде работает на сервере chat-engine (tg_bot/docker-compose.yml).
 # Локально: docker compose up --build
-# Бот Telegram и мост к chat-engine: COMPOSE_PROFILES=telegram,engine docker compose up --build
+# Локально бот Telegram и мост: COMPOSE_PROFILES=telegram,engine docker compose up --build
 # На сервере CI подставляет образы из Docker Hub, сборки нет.
 # Chat API: http://127.0.0.1:8000/docs
 # На сервере Studio и Chat API открыты наружу только через cloudflared (профиль proxy).
@@ -68,6 +69,8 @@ services:
       CHAT_API_APP_TOKEN: ${CHAT_API_APP_TOKEN:?Задайте CHAT_API_APP_TOKEN в .env}
       # Без токена engine_bridge люди ищут только друг друга.
       CHAT_API_ENGINE_TOKEN: ${CHAT_API_ENGINE_TOKEN:-}
+      # Бот Telegram работает на сервере chat-engine и ходит сюда через Cloudflare Access.
+      CHAT_API_TG_TOKEN: ${CHAT_API_TG_TOKEN:-}
       ENGINE_FALLBACK_AFTER_SECONDS: ${ENGINE_FALLBACK_AFTER_SECONDS:-0}
       STATS_ONLINE_WINDOW_SECONDS: ${STATS_ONLINE_WINDOW_SECONDS:-300}
     depends_on:
@@ -106,22 +109,20 @@ services:
       redis:
         condition: service_healthy
 
-  # Бот Telegram: та же очередь, что у ВК. Запускается с профилем telegram.
+  # Бот Telegram для локальной разработки (профиль telegram).
+  # На проде он работает на сервере chat-engine: tg_bot/docker-compose.yml.
   tg-bot:
-    image: ${TG_BOT_IMAGE:-dating-tg-bot:local}
+    image: dating-tg-bot:local
     build: ./tg_bot
     container_name: vk-tg-bot
     profiles: ["telegram"]
     restart: unless-stopped
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      CHAT_API_SERVICE_TOKEN: ${CHAT_API_SERVICE_TOKEN:?Задайте CHAT_API_SERVICE_TOKEN в .env}
+      CHAT_API_TG_TOKEN: ${CHAT_API_TG_TOKEN:-}
       CHAT_API_URL: http://chat-api:8000
-      REDIS_URL: redis://redis:6379/0
     depends_on:
       chat-api:
-        condition: service_healthy
-      redis:
         condition: service_healthy
 
   # Собеседники из chat-engine (bots.chatwithyou.site), когда живых в очереди нет. Профиль engine.

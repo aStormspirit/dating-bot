@@ -9,8 +9,8 @@ if [ -z "${GIT_SHA:-}" ]; then
   echo "Не задан GIT_SHA." >&2
   exit 1
 fi
-if [ -z "${BOT_IMAGE:-}" ] || [ -z "${CHAT_API_IMAGE:-}" ] || [ -z "${TG_BOT_IMAGE:-}" ] || [ -z "${ENGINE_BRIDGE_IMAGE:-}" ]; then
-  echo "Не заданы BOT_IMAGE, CHAT_API_IMAGE, TG_BOT_IMAGE и ENGINE_BRIDGE_IMAGE." >&2
+if [ -z "${BOT_IMAGE:-}" ] || [ -z "${CHAT_API_IMAGE:-}" ] || [ -z "${ENGINE_BRIDGE_IMAGE:-}" ]; then
+  echo "Не заданы BOT_IMAGE, CHAT_API_IMAGE и ENGINE_BRIDGE_IMAGE." >&2
   exit 1
 fi
 
@@ -159,16 +159,16 @@ ensure_secret CHAT_API_SERVICE_TOKEN
 require_secret CHAT_API_APP_TOKEN
 require_secret CLOUDFLARE_TUNNEL_TOKEN
 
-# Бот Telegram и мост к chat-engine запускаются, только если для них есть токены.
+# Бот Telegram работает на сервере chat-engine, здесь Chat API только принимает его токен.
+docker rm -f vk-tg-bot >/dev/null 2>&1 || true
+if ! optional_secret CHAT_API_TG_TOKEN; then
+  echo "Нет CHAT_API_TG_TOKEN: Chat API не примет запросы бота Telegram."
+  drop_env CHAT_API_TG_TOKEN
+fi
+
+# Мост к chat-engine запускается, только если есть токен chat-engine.
 profiles=proxy
 optional_services=""
-if optional_secret TELEGRAM_BOT_TOKEN; then
-  profiles="${profiles},telegram"
-  optional_services="${optional_services} tg-bot"
-else
-  echo "Нет TELEGRAM_BOT_TOKEN: бот Telegram не запускается."
-  docker rm -f vk-tg-bot >/dev/null 2>&1 || true
-fi
 if optional_secret CHAT_ENGINE_TOKEN; then
   ensure_secret CHAT_API_ENGINE_TOKEN
   profiles="${profiles},engine"
@@ -203,9 +203,7 @@ sleep 12
 docker logs vk-bot-cloudflared --tail 20 2>&1 | grep -E "Registered tunnel connection|ERR|error" || true
 docker logs vk-chat-api --tail 40 2>&1 | grep -E "Схема базы|Application startup|ERROR|Traceback" || true
 docker logs vk-bot --tail 80 2>&1 | grep -E "Токенов ВК|VK:|Chat API|События|пропущен|Нет доступа|Токен невалиден|Бот запущен|Ошибка запуска|VK Error|Traceback" || true
-for name in vk-tg-bot vk-engine-bridge; do
-  if docker inspect "$name" >/dev/null 2>&1; then
-    docker logs "$name" --tail 30 2>&1 | grep -E "Бот @|Chat API|Аккаунт|Читаю|Не задан|WARNING|ERROR|Traceback" || true
-  fi
-done
+if docker inspect vk-engine-bridge >/dev/null 2>&1; then
+  docker logs vk-engine-bridge --tail 30 2>&1 | grep -E "Chat API|Аккаунт|Читаю|Не задан|WARNING|ERROR|Traceback" || true
+fi
 docker image prune -af

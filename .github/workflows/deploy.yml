@@ -120,7 +120,7 @@ jobs:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           CHAT_API_APP_TOKEN: ${{ secrets.CHAT_API_APP_TOKEN }}
           CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_API_TG_TOKEN: ${{ secrets.CHAT_API_TG_TOKEN }}
           CHAT_ENGINE_TOKEN: ${{ secrets.CHAT_ENGINE_TOKEN }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
@@ -128,7 +128,7 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT || 22 }}
           command_timeout: 30m
-          envs: DEPLOY_PATH,ENV_FILE_B64,GIT_SHA,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,CHAT_API_APP_TOKEN,CLOUDFLARE_TUNNEL_TOKEN,TELEGRAM_BOT_TOKEN,CHAT_ENGINE_TOKEN
+          envs: DEPLOY_PATH,ENV_FILE_B64,GIT_SHA,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,CHAT_API_APP_TOKEN,CLOUDFLARE_TUNNEL_TOKEN,CHAT_API_TG_TOKEN,CHAT_ENGINE_TOKEN
           script: |
             set -eu
             if [ -n "${DEPLOY_PATH:-}" ]; then
@@ -139,7 +139,6 @@ jobs:
             hub_user=$(printf '%s' "$DOCKERHUB_USERNAME" | tr '[:upper:]' '[:lower:]')
             export BOT_IMAGE="${hub_user}/dating-bot:${GIT_SHA}"
             export CHAT_API_IMAGE="${hub_user}/dating-chat-api:${GIT_SHA}"
-            export TG_BOT_IMAGE="${hub_user}/dating-tg-bot:${GIT_SHA}"
             export ENGINE_BRIDGE_IMAGE="${hub_user}/dating-engine-bridge:${GIT_SHA}"
             if [ ! -d "$APP_DIR/.git" ]; then
               mkdir -p "$(dirname "$APP_DIR")"
@@ -149,3 +148,66 @@ jobs:
             git fetch origin "$GIT_SHA"
             git checkout --detach --force "$GIT_SHA"
             sh deploy/update.sh
+
+  # Бот Telegram на сервере chat-engine. После deploy: ему нужен уже обновлённый Chat API.
+  telegram:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check secrets
+        id: check
+        env:
+          TG_DEPLOY_HOST: ${{ secrets.TG_DEPLOY_HOST }}
+          TG_DEPLOY_USER: ${{ secrets.TG_DEPLOY_USER }}
+          TG_DEPLOY_SSH_KEY: ${{ secrets.TG_DEPLOY_SSH_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_API_TG_TOKEN: ${{ secrets.CHAT_API_TG_TOKEN }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          missing=""
+          for name in TG_DEPLOY_HOST TG_DEPLOY_USER TG_DEPLOY_SSH_KEY TELEGRAM_BOT_TOKEN CHAT_API_TG_TOKEN CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET; do
+            eval "value=\${$name}"
+            if [ -z "$value" ]; then
+              missing="$missing $name"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::warning::Бот Telegram не деплоится, нет секретов:$missing"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update Telegram bot
+        if: steps.check.outputs.ready == 'true'
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          TG_DEPLOY_PATH: ${{ secrets.TG_DEPLOY_PATH }}
+          GIT_SHA: ${{ github.sha }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_API_TG_TOKEN: ${{ secrets.CHAT_API_TG_TOKEN }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        with:
+          host: ${{ secrets.TG_DEPLOY_HOST }}
+          username: ${{ secrets.TG_DEPLOY_USER }}
+          key: ${{ secrets.TG_DEPLOY_SSH_KEY }}
+          port: ${{ secrets.TG_DEPLOY_PORT || 22 }}
+          command_timeout: 15m
+          envs: TG_DEPLOY_PATH,GIT_SHA,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,TELEGRAM_BOT_TOKEN,CHAT_API_TG_TOKEN,CF_ACCESS_CLIENT_ID,CF_ACCESS_CLIENT_SECRET
+          script: |
+            set -eu
+            APP_DIR="${TG_DEPLOY_PATH:-${HOME}/dating-tg-bot}"
+            hub_user=$(printf '%s' "$DOCKERHUB_USERNAME" | tr '[:upper:]' '[:lower:]')
+            export TG_BOT_IMAGE="${hub_user}/dating-tg-bot:${GIT_SHA}"
+            if [ ! -d "$APP_DIR/.git" ]; then
+              mkdir -p "$(dirname "$APP_DIR")"
+              git clone https://github.com/aStormspirit/dating-bot.git "$APP_DIR"
+            fi
+            cd "$APP_DIR"
+            git fetch origin "$GIT_SHA"
+            git checkout --detach --force "$GIT_SHA"
+            sh deploy/tg_update.sh
