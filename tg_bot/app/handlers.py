@@ -84,10 +84,10 @@ async def handle_chat_line(peer: Peer, text: str, chatting: bool) -> bool:
     return True
 
 
-async def handle_incoming(peer: Peer, text: str) -> None:
+async def handle_incoming(peer: Peer, text: str, handle: str | None = None) -> None:
     """Маршрутизирует сообщение: старт, затем меню или диалог."""
     try:
-        await chat_api.visit(peer)
+        await chat_api.visit(peer, handle)
     except ChatApiError as exc:
         logger.warning("Не записал визит %s: %s", peer, exc)
     command = _command(text)
@@ -116,8 +116,10 @@ async def on_message(message: Message) -> None:
     if message.from_user is None or message.from_user.is_bot:
         return
     peer = Peer(str(message.bot.id), message.from_user.id)
+    username = (message.from_user.username or "").strip()
+    handle = f"@{username}" if username else None
     try:
-        await handle_incoming(peer, (message.text or "").strip())
+        await handle_incoming(peer, (message.text or "").strip(), handle)
     except Exception:  # ошибка одного сообщения не должна ронять polling
         logger.exception("Ошибка ответа %s", peer)
 

@@ -46,8 +46,21 @@ class ChatApiClient:
             return None
         return response.json()
 
-    async def visit(self, peer: Peer) -> None:
-        await self._request("POST", peer, "visit")
+    async def visit(self, peer: Peer, handle: str | None = None) -> None:
+        await self._request("POST", peer, "visit", {"handle": handle} if handle else None)
+
+    async def register_channel(self, platform: str, external_id: str, title: str) -> None:
+        """Сообщает Chat API, что этот бот Telegram подключён."""
+        path = "/channels"
+        try:
+            response = await self._http.post(
+                path,
+                json={"platform": platform, "external_id": external_id, "title": title},
+            )
+        except httpx.HTTPError as exc:
+            raise ChatApiError(f"POST {path}: {type(exc).__name__}: {exc}") from exc
+        if response.is_error:
+            raise ChatApiError(f"POST {path}: HTTP {response.status_code} {response.text}")
 
     async def phase(self, peer: Peer) -> str:
         return (await self._request("GET", peer, "state"))["phase"]

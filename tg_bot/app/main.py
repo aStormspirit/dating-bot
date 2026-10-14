@@ -9,7 +9,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
 
-from app.api_client import chat_api
+from app.api_client import ChatApiError, chat_api
 from app.config import CHAT_API_TG_TOKEN, CHAT_API_URL, TELEGRAM_BOT_TOKEN
 from app.events import consume_events
 from app.gateway import gateway
@@ -38,6 +38,11 @@ async def _run() -> None:
         me = await bot.get_me()
         gateway.bind(bot)
         await bot.set_my_commands(_COMMANDS)
+        try:
+            title = f"@{me.username}" if me.username else ""
+            await chat_api.register_channel("tg", str(me.id), title)
+        except ChatApiError:
+            logger.warning("Не записал бота Telegram в список чатов", exc_info=True)
 
         dispatcher = Dispatcher()
         dispatcher.include_router(router)

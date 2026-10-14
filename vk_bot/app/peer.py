@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Peer:
-    """Куда слать ответ. Один и тот же человек в двух сообществах — два разных адреса."""
+    """Куда слать ответ. bot_key — сообщество, в которое человек написал."""
 
     bot_key: str
     user_id: int

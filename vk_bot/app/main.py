@@ -11,7 +11,7 @@ from vkbottle import GroupEventType
 from vkbottle.bot import Bot, MessageEvent
 from vkbottle.http.aiohttp import AiohttpClient
 
-from app.api_client import chat_api
+from app.api_client import ChatApiError, chat_api
 from app.config import CHAT_API_SERVICE_TOKEN, CHAT_API_URL, vk_tokens
 from app.events import consume_events
 from app.gateway import gateway
@@ -71,11 +71,15 @@ async def _run() -> None:
     print(f"Токенов ВК: {len(tokens)}.")
     for token in tokens:
         try:
-            group_id = preflight_check(token)
+            group_id, group_name = preflight_check(token)
         except SystemExit as exc:
             print(f"Токен сообщества пропущен: {exc}", file=sys.stderr)
             continue
         bot_key = str(group_id)
+        try:
+            await chat_api.register_channel("vk", bot_key, group_name)
+        except ChatApiError as exc:
+            print(f"Не записал сообщество group_id={group_id}: {exc}", flush=True)
         bot = community_bot(token)
         gateway.add(bot_key, bot.api)
         bot.on.message()(vk_handler(bot_key))

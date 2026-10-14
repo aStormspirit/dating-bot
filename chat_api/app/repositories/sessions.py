@@ -1,4 +1,4 @@
-"""Запросы к chat_sessions и bot_users. Транзакцией управляет сервис."""
+"""Запросы к сессиям, людям и чатам бота. Транзакцией управляет сервис."""
 
 from __future__ import annotations
 
@@ -187,19 +187,28 @@ async def engine_demand(conn: AsyncConnection, min_wait_seconds: float) -> tuple
 async def presence_stats(conn: AsyncConnection, online_window_seconds: float) -> dict[str, int]:
     """Онлайн, в поиске и в диалоге — отдельно для людей и аккаунтов chat-engine.
 
-    Онлайн: кто сейчас ищет или в диалоге, плюс кто писал за последние online_window_seconds.
+    Онлайн людей считается по человеку, а не по чату: два сообщества одного vk id — один.
+    Кто сейчас ищет или в диалоге, плюс кто писал за последние online_window_seconds.
     """
     cursor = await conn.execute(
         """
-        WITH online AS (
-            SELECT platform, bot_key, user_id FROM bot_users
+        WITH human_online AS (
+            SELECT platform, user_id FROM bot_users
             WHERE last_seen_at >= NOW() - make_interval(secs => %(window)s)
             UNION
-            SELECT platform, bot_key, user_id FROM chat_sessions WHERE phase <> 'idle'
+            SELECT platform, user_id FROM chat_sessions
+            WHERE phase <> 'idle' AND platform <> %(engine)s
+        ),
+        bot_online AS (
+            SELECT bot_key FROM engine_presence
+            WHERE last_seen_at >= NOW() - make_interval(secs => %(window)s)
+            UNION
+            SELECT bot_key FROM chat_sessions
+            WHERE phase <> 'idle' AND platform = %(engine)s
         )
         SELECT
-            (SELECT count(*) FROM online WHERE platform <> %(engine)s) AS humans_online,
-            (SELECT count(*) FROM online WHERE platform = %(engine)s) AS bots_online,
+            (SELECT count(*) FROM human_online) AS humans_online,
+            (SELECT count(*) FROM bot_online) AS bots_online,
             count(*) FILTER (WHERE platform <> %(engine)s AND phase = 'searching') AS humans_searching,
             count(*) FILTER (WHERE platform <> %(engine)s AND phase = 'chatting') AS humans_chatting,
             count(*) FILTER (WHERE platform = %(engine)s AND phase = 'searching') AS bots_searching,
@@ -212,27 +221,100 @@ async def presence_stats(conn: AsyncConnection, online_window_seconds: float) ->
     return {key: int(value) for key, value in row.items()}
 
 
-async def touch_user(conn: AsyncConnection, peer: Peer) -> None:
-    """Запоминает пользователя при первом обращении и отмечает время последней активности."""
+def _public_handle(peer: Peer, handle: str | None) -> str | None:
+    """Ссылка ВК или @username Telegram. Пустое значение не затирает уже сохранённое."""
+    if peer.platform == "vk":
+        return f"https://vk.com/id{peer.user_id}"
+    if peer.platform != "tg":
+        return None
+    username = (handle or "").strip().lstrip("@")
+    if (
+        not username
+        or len(username) > 32
+        or not username.isascii()
+        or not username.replace("_", "").isalnum()
+    ):
+        return None
+    return f"@{username}"
+
+
+async def register_channel(conn: AsyncConnection, platform: str, external_id: str, title: str) -> None:
+    """Создаёт чат бота или обновляет его название, если оно передано."""
     await conn.execute(
         """
-        INSERT INTO bot_users (platform, bot_key, user_id)
-        VALUES (%(platform)s, %(bot_key)s, %(user_id)s)
-        ON CONFLICT (platform, bot_key, user_id) DO UPDATE SET last_seen_at = NOW()
+        INSERT INTO channels (platform, external_id, title)
+        VALUES (%(platform)s, %(external_id)s, %(title)s)
+        ON CONFLICT (platform, external_id) DO UPDATE SET
+            title = CASE
+                WHEN EXCLUDED.title <> '' THEN EXCLUDED.title
+                ELSE channels.title
+            END
         """,
-        _key(peer),
+        {"platform": platform, "external_id": external_id.strip(), "title": title.strip()},
     )
 
 
+async def touch_user(conn: AsyncConnection, peer: Peer, handle: str | None = None) -> None:
+    """Запоминает пользователя при первом обращении и отмечает время последней активности."""
+    await _remember(conn, peer, handle, search_delta=0)
+
+
 async def record_search(conn: AsyncConnection, peer: Peer) -> None:
+    await _remember(conn, peer, None, search_delta=1)
+
+
+async def _remember(conn: AsyncConnection, peer: Peer, handle: str | None, search_delta: int) -> None:
+    if peer.is_engine:
+        await conn.execute(
+            """
+            INSERT INTO engine_presence (bot_key)
+            VALUES (%(bot_key)s)
+            ON CONFLICT (bot_key) DO UPDATE SET last_seen_at = NOW()
+            """,
+            _key(peer),
+        )
+        return
+
+    params = {**_key(peer), "handle": _public_handle(peer, handle), "delta": search_delta}
+    if not peer.bot_key:
+        await conn.execute(
+            """
+            INSERT INTO bot_users (platform, user_id, handle, search_count, last_seen_at)
+            VALUES (%(platform)s, %(user_id)s, %(handle)s, %(delta)s, NOW())
+            ON CONFLICT (platform, user_id) DO UPDATE SET
+                last_seen_at = NOW(),
+                updated_at = CASE WHEN %(delta)s > 0 THEN NOW() ELSE bot_users.updated_at END,
+                search_count = bot_users.search_count + %(delta)s,
+                handle = COALESCE(%(handle)s, bot_users.handle)
+            """,
+            params,
+        )
+        return
+
     await conn.execute(
         """
-        INSERT INTO bot_users (platform, bot_key, user_id, search_count)
-        VALUES (%(platform)s, %(bot_key)s, %(user_id)s, 1)
-        ON CONFLICT (platform, bot_key, user_id) DO UPDATE SET
-            search_count = bot_users.search_count + 1,
-            updated_at = NOW(),
-            last_seen_at = NOW()
+        WITH channel AS (
+            INSERT INTO channels (platform, external_id)
+            VALUES (%(platform)s, %(bot_key)s)
+            ON CONFLICT (platform, external_id) DO UPDATE SET title = channels.title
+            RETURNING id
+        ),
+        person AS (
+            INSERT INTO bot_users (platform, user_id, handle, search_count, last_seen_at)
+            VALUES (%(platform)s, %(user_id)s, %(handle)s, %(delta)s, NOW())
+            ON CONFLICT (platform, user_id) DO UPDATE SET
+                last_seen_at = NOW(),
+                updated_at = CASE WHEN %(delta)s > 0 THEN NOW() ELSE bot_users.updated_at END,
+                search_count = bot_users.search_count + %(delta)s,
+                handle = COALESCE(%(handle)s, bot_users.handle)
+            RETURNING platform, user_id
+        )
+        INSERT INTO user_channels (user_platform, user_id, channel_id, search_count, last_seen_at)
+        SELECT person.platform, person.user_id, channel.id, %(delta)s, NOW()
+        FROM person, channel
+        ON CONFLICT (user_platform, user_id, channel_id) DO UPDATE SET
+            last_seen_at = NOW(),
+            search_count = user_channels.search_count + %(delta)s
         """,
-        _key(peer),
+        params,
     )

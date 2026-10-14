@@ -13,7 +13,7 @@ ENGINE_USER_ID = 1
 
 @dataclass(frozen=True)
 class Peer:
-    """Один и тот же человек в двух ботах — два разных адреса."""
+    """Куда доставить ответ: платформа, бот и id человека на ней."""
 
     platform: str
     bot_key: str

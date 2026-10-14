@@ -14,7 +14,7 @@ from redis.asyncio import Redis
 from app.config import get_settings
 from app.db import create_pool, ensure_schema
 from app.events import REDIS_SOCKET_TIMEOUT, EventBus, WebSocketHub
-from app.routers import engine, peers, stats, ws
+from app.routers import channels, engine, peers, stats, ws
 from app.services.chat import ChatService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -52,6 +52,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="Chat API", version="1.2.0", lifespan=lifespan)
 
 app.include_router(peers.router, prefix="/api/v1")
+app.include_router(channels.router, prefix="/api/v1")
 app.include_router(engine.router, prefix="/api/v1")
 app.include_router(stats.router, prefix="/api/v1")
 app.include_router(ws.router, prefix="/api/v1")

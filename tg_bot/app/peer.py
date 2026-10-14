@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Peer:
-    """Куда слать ответ. bot_key — id бота, чтобы два бота не делили одного пользователя."""
+    """Куда слать ответ. bot_key — id бота Telegram."""
 
     bot_key: str
     user_id: int

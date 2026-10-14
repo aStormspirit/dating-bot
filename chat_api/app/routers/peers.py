@@ -6,10 +6,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Body, HTTPException, status
 
 from app.deps import Chat, HumanPeer, ServicePeer
-from app.schemas import MessageIn, MessageOut, StateOut, StopOut
+from app.schemas import MessageIn, MessageOut, StateOut, StopOut, VisitIn
 from app.services.chat import NotChattingError
 
 _NOT_CHATTING = "Нет активного диалога"
@@ -25,9 +25,13 @@ router = APIRouter(
 
 
 @router.post("/visit", status_code=status.HTTP_204_NO_CONTENT, summary="Отметить визит")
-async def visit(peer: ServicePeer, chat: Chat) -> None:
-    """Запоминает пользователя при первом обращении. Повторные вызовы ничего не меняют."""
-    await chat.visit(peer)
+async def visit(peer: ServicePeer, chat: Chat, body: VisitIn | None = Body(default=None)) -> None:
+    """Запоминает пользователя и чат, через который он зашёл, и обновляет время визита.
+
+    Для Telegram в теле можно передать `handle` — `@username`. Пустое значение
+    уже сохранённое имя не затирает.
+    """
+    await chat.visit(peer, body.handle if body else None)
 
 
 @router.get("/state", summary="Текущее состояние")

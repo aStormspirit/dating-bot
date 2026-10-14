@@ -25,8 +25,8 @@ def rebuild_vkbottle_response_models() -> None:
         model.model_rebuild(_types_namespace=types_namespace)
 
 
-def preflight_check(token: str) -> int:
-    """Проверяет доступ к Long Poll до запуска бота. Возвращает group_id."""
+def preflight_check(token: str) -> tuple[int, str]:
+    """Проверяет доступ к Long Poll до запуска бота. Возвращает id и название сообщества."""
     response = requests.get(
         "https://api.vk.com/method/groups.getById",
         params={"access_token": token, "v": API_VERSION},
@@ -70,7 +70,7 @@ def preflight_check(token: str) -> int:
 
     ensure_incoming_events(token, group_id)
     ensure_bot_capabilities(token, group_id)
-    return group_id
+    return group_id, str(group.get("name") or "")
 
 
 def ensure_incoming_events(token: str, group_id: int) -> None:

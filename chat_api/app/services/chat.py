@@ -131,9 +131,13 @@ class ChatService:
             await self._events.request_engine()
         return StateOut(phase=phase)
 
-    async def visit(self, peer: Peer) -> None:
+    async def visit(self, peer: Peer, handle: str | None = None) -> None:
         async with self._pool.connection() as conn:
-            await repo.touch_user(conn, peer)
+            await repo.touch_user(conn, peer, handle)
+
+    async def register_channel(self, platform: str, external_id: str, title: str) -> None:
+        async with self._pool.connection() as conn:
+            await repo.register_channel(conn, platform, external_id, title)
 
     async def state(self, peer: Peer) -> StateOut:
         async with self._pool.connection() as conn:

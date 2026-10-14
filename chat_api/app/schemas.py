@@ -14,6 +14,20 @@ class StateOut(BaseModel):
     phase: Phase = Field(description="`idle` — вне чата, `searching` — в очереди, `chatting` — в диалоге")
 
 
+class VisitIn(BaseModel):
+    handle: str | None = Field(
+        default=None,
+        max_length=64,
+        description="Публичное имя. Для Telegram — @username",
+    )
+
+
+class ChannelIn(BaseModel):
+    platform: Literal["vk", "tg", "web"]
+    external_id: str = Field(min_length=1, max_length=64, description="Id сообщества ВК, бота Telegram или site")
+    title: str = Field(default="", max_length=255, description="Название чата. Пустое не затирает уже записанное")
+
+
 class StopOut(BaseModel):
     phase: Phase = "idle"
     was_active: bool = Field(description="Был ли поиск или диалог до остановки")
