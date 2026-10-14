@@ -2,44 +2,96 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from app.peer import Peer
 from app.ui import (
     build_chat_keyboard,
-    build_idle_keyboard,
     build_main_keyboard,
     build_partner_left_keyboard,
+    empty_keyboard,
     new_random_id,
 )
 
 
-def vk_keyboard(kind: str) -> str:
-    """Клавиатура ВК: кнопки диалога, уход собеседника, inline «Начать» или постоянная «Начать»."""
+def vk_keyboard(kind: str) -> str | None:
+    """Клавиатура под текстом. None — реплика собеседника, без кнопок диалога."""
+    if kind == "line":
+        return None
     if kind == "chat":
         return build_chat_keyboard()
     if kind == "partner_left":
         return build_partner_left_keyboard()
-    if kind == "greeting":
-        return build_main_keyboard()
-    return build_idle_keyboard()
+    return build_main_keyboard()
 
 
-async def send_vk(api: Any, peer_id: int, text: str, keyboard: str) -> None:
-    """Пишет в диалог ВК. Если клавиатуру отклонили, отправляет тот же текст без неё."""
+def _is_inline(keyboard: str) -> bool:
     try:
-        await api.messages.send(
+        data = json.loads(keyboard)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(data, dict) and bool(data.get("inline"))
+
+
+def _message_id(response: object) -> int | None:
+    if isinstance(response, int):
+        return response
+    if isinstance(response, dict):
+        value = response.get("response", response.get("message_id"))
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+    return None
+
+
+async def _send_plain(api: Any, peer_id: int, text: str, keyboard: str | None = None) -> object:
+    payload: dict[str, Any] = {"peer_id": peer_id, "message": text, "random_id": new_random_id()}
+    if keyboard is not None:
+        payload["keyboard"] = keyboard
+    return await api.messages.send(**payload)
+
+
+async def send_vk(api: Any, peer_id: int, text: str, keyboard: str | None) -> None:
+    """Пишет в диалог ВК. Inline-кнопки крепятся к тексту и снимают старую нижнюю клавиатуру."""
+    if keyboard is None or not _is_inline(keyboard):
+        try:
+            await _send_plain(api, peer_id, text, keyboard)
+        except Exception as exc:
+            print(
+                f"Клавиатура не принята для peer={peer_id}, шлю текст: {type(exc).__name__}: {exc}",
+                flush=True,
+            )
+            await _send_plain(api, peer_id, text)
+        return
+    try:
+        sent = await _send_plain(api, peer_id, text, empty_keyboard())
+    except Exception as exc:
+        print(
+            f"Не снял нижнюю клавиатуру peer={peer_id}: {type(exc).__name__}: {exc}",
+            flush=True,
+        )
+        await _send_plain(api, peer_id, text, keyboard)
+        return
+    message_id = _message_id(sent)
+    if message_id is None:
+        await _send_plain(api, peer_id, text, keyboard)
+        return
+    try:
+        await api.messages.edit(
             peer_id=peer_id,
             message=text,
+            message_id=message_id,
             keyboard=keyboard,
-            random_id=new_random_id(),
         )
     except Exception as exc:
         print(
-            f"Клавиатура не принята для peer={peer_id}, шлю текст: {type(exc).__name__}: {exc}",
+            f"Не прикрепил кнопки peer={peer_id}, шлю отдельным сообщением: "
+            f"{type(exc).__name__}: {exc}",
             flush=True,
         )
-        await api.messages.send(peer_id=peer_id, message=text, random_id=new_random_id())
+        await _send_plain(api, peer_id, text, keyboard)
 
 
 class Gateway:

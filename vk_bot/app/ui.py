@@ -3,7 +3,7 @@
 import json
 import random
 
-from vkbottle import Callback, Keyboard, KeyboardButtonColor, Text
+from vkbottle import Callback, Keyboard, KeyboardButtonColor
 
 MENU_TEXT = "Найди собеседника прямо сейчас"
 COMMUNITY_GREETING = (
@@ -15,11 +15,12 @@ START_BTN = "Начать"
 CHAT_BTN_NEXT = "➡️ Следующий собеседник"
 CHAT_BTN_STOP = "🛑 Закончить диалог"
 NEW_PARTNER_BTN = "🔍 Новый собеседник"
+STOP_BTN = "Остановить диалог"
 REPORT_BTN = "🚫 Пожаловаться"
 
 SEARCHING_TEXT = "🔎 Ищем собеседника..."
 NO_PARTNERS_TEXT = "Сейчас собеседников нет, приходите чуть позже 😔"
-FOUND_TEXT = "💬 Собеседник найден. Вы можете писать ему сюда 👇"
+FOUND_TEXT = "Комната 💬 найдена. Общайтесь!"
 STOPPED_TEXT = f"{MENU_TEXT}\n\nДиалог остановлен. Нажми «Начать», чтобы начать снова."
 PARTNER_LEFT_TEXT = (
     "Собеседник закончил диалог 😔\n\n"
@@ -49,32 +50,40 @@ def build_main_keyboard() -> str:
     return keyboard.get_json()
 
 
-def build_idle_keyboard() -> str:
-    """Постоянная клавиатура лички вне диалога: заменяет кнопки диалога одной «Начать»."""
-    keyboard = Keyboard(one_time=False, inline=False).add(
-        Text(START_BTN, payload={"command": "start"}),
-        color=KeyboardButtonColor.POSITIVE,
-    )
-    return keyboard.get_json()
+def empty_keyboard() -> str:
+    """Снимает нижнюю клавиатуру над полем ввода."""
+    return Keyboard().get_empty_keyboard()
 
 
 def build_chat_keyboard() -> str:
-    """Клавиатура активного диалога: две кнопки друг под другом."""
+    """Под текстом «комната найдена»: синяя «Новый собеседник» и серая «Остановить диалог»."""
     keyboard = (
-        Keyboard(one_time=False, inline=False)
-        .add(Text(CHAT_BTN_NEXT), color=KeyboardButtonColor.SECONDARY)
+        Keyboard(inline=True)
+        .add(
+            Callback(NEW_PARTNER_BTN, payload=json.dumps({"command": "start"})),
+            color=KeyboardButtonColor.PRIMARY,
+        )
         .row()
-        .add(Text(CHAT_BTN_STOP), color=KeyboardButtonColor.SECONDARY)
+        .add(
+            Callback(STOP_BTN, payload=json.dumps({"command": "stop"})),
+            color=KeyboardButtonColor.SECONDARY,
+        )
     )
     return keyboard.get_json()
 
 
 def build_partner_left_keyboard() -> str:
-    """После ухода собеседника: синяя «Новый собеседник» и «Пожаловаться»."""
+    """Под текстом об уходе: синяя «Новый собеседник» и серая «Пожаловаться»."""
     keyboard = (
-        Keyboard(one_time=False, inline=False)
-        .add(Text(NEW_PARTNER_BTN, payload={"command": "start"}), color=KeyboardButtonColor.PRIMARY)
+        Keyboard(inline=True)
+        .add(
+            Callback(NEW_PARTNER_BTN, payload=json.dumps({"command": "start"})),
+            color=KeyboardButtonColor.PRIMARY,
+        )
         .row()
-        .add(Text(REPORT_BTN, payload={"command": "report"}), color=KeyboardButtonColor.SECONDARY)
+        .add(
+            Callback(REPORT_BTN, payload=json.dumps({"command": "report"})),
+            color=KeyboardButtonColor.SECONDARY,
+        )
     )
     return keyboard.get_json()

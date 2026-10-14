@@ -24,6 +24,7 @@ from app.ui import (
     REPORT_SENT_TEXT,
     SEARCHING_TEXT,
     SERVICE_DOWN_TEXT,
+    STOP_BTN,
     STOPPED_TEXT,
     build_main_keyboard,
 )
@@ -63,12 +64,19 @@ def _is_report(text: str, payload: dict) -> bool:
     return text.strip().lower() in {REPORT_BTN.lower(), "пожаловаться"}
 
 
+async def stop_active(peer: Peer) -> None:
+    """Заканчивает поиск или диалог и ставит «Начать» под текстом."""
+    if await chat_api.phase(peer) != "idle":
+        await chat_api.stop(peer)
+    cancel_search_timeout(peer)
+    await gateway.send(peer, STOPPED_TEXT, "main")
+
+
 async def handle_stop(peer: Peer, text: str, active: bool) -> bool:
     """Заканчивает диалог или поиск и возвращает основное меню."""
-    if text != CHAT_BTN_STOP or not active:
+    if text.strip().lower() not in {CHAT_BTN_STOP.lower(), STOP_BTN.lower()} or not active:
         return False
-    await chat_api.stop(peer)
-    await gateway.send(peer, STOPPED_TEXT, "main")
+    await stop_active(peer)
     return True
 
 
@@ -88,7 +96,7 @@ async def handle_chat_line(peer: Peer, text: str, chatting: bool) -> bool:
     if not chatting:
         return False
     if not text:
-        await gateway.send(peer, "Напиши текстом.", "chat")
+        await gateway.send(peer, "Напиши текстом.", "line")
         return True
     try:
         delivered = (await chat_api.send_message(peer, text)).delivered
@@ -165,7 +173,7 @@ def vk_handler(bot_key: str):
 
 
 def vk_start_handler(bot_key: str):
-    """Нажатие inline-кнопки «Начать» в личке или в беседе сообщества."""
+    """Нажатие inline-кнопки: поиск, остановка или жалоба."""
 
     async def _handle(event: MessageEvent) -> None:
         print(
@@ -176,19 +184,25 @@ def vk_start_handler(bot_key: str):
             await event.send_empty_answer()
         except Exception as exc:  # noqa: BLE001 — ответ на нажатие не должен срывать поиск
             print(f"Не подтвердил нажатие: {type(exc).__name__}: {exc}", flush=True)
-        if parse_payload(event.payload).get("command") != "start":
+        command = parse_payload(event.payload).get("command")
+        if command not in {"start", "stop", "report"}:
             return
         if event.user_id is None or event.user_id <= 0:
             return
         peer = Peer(bot_key, event.user_id)
         try:
-            await connect_with_partner(peer)
+            if command == "start":
+                await connect_with_partner(peer)
+            elif command == "stop":
+                await stop_active(peer)
+            else:
+                await handle_report(peer)
         except ChatApiError as exc:
             print(f"Chat API недоступен для {peer}: {exc}", flush=True)
             await gateway.send(peer, SERVICE_DOWN_TEXT, "main")
         except Exception as exc:  # noqa: BLE001
             print(
-                f"Ошибка кнопки Начать group={bot_key} from={event.user_id}: "
+                f"Ошибка кнопки {command} group={bot_key} from={event.user_id}: "
                 f"{type(exc).__name__}: {exc}",
                 flush=True,
             )
