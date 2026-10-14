@@ -27,8 +27,11 @@ logger = logging.getLogger(__name__)
 _RECONNECT_DELAY_SECONDS = 3.0
 
 # Служебные фразы анонимного бота (@AnonRuBot и похожие). Их нельзя отдавать человеку.
+# Уход собеседника закрывает диалог. Реклама и меню — нет: в «Собеседник найден»
+# есть ссылка t.me/anon…, и /stop по ней обрывал каждый новый диалог.
 _PARTNER_LEFT_RE = re.compile(
     r"закончил(?:а|и)? с вами связь|"
+    r"закончил(?:а|и)? связь|"
     r"собеседник (?:покинул|вышел|отключ|закончил)|"
     r"диалог (?:завершен|завершён|окончен)|"
     r"partner left|chat (?:ended|stopped)",
@@ -44,6 +47,15 @@ _ENGINE_SYSTEM_RE = re.compile(
     r"@anonrusupport",
     re.IGNORECASE,
 )
+
+
+def classify_engine_text(text: str) -> str:
+    """leave — собеседник ушёл; drop — меню и реклама бота; forward — реплика человека."""
+    if _PARTNER_LEFT_RE.search(text):
+        return "leave"
+    if _ENGINE_SYSTEM_RE.search(text):
+        return "drop"
+    return "forward"
 
 
 @dataclass(eq=False)
@@ -161,9 +173,17 @@ class Bridge:
             message = event.get("message") or {}
             text = str(message.get("text") or "")
             incoming = message.get("direction") == "in" and bool(text)
-            if incoming and (_PARTNER_LEFT_RE.search(text) or _ENGINE_SYSTEM_RE.search(text)):
-                logger.info("Служебное сообщение chat-engine %s, человеку не отправляю", link.id)
+            kind_text = classify_engine_text(text) if incoming else "forward"
+            if kind_text == "leave":
+                logger.info("chat-engine %s: собеседник завершил диалог", link.id)
                 await self._end_from_engine(link)
+                return
+            if kind_text == "drop":
+                # Меню и реклама не закрывают диалог. К chatting можно перейти,
+                # если событие state ещё не пришло; в idle из рекламы не уходим.
+                logger.info("Служебное сообщение chat-engine %s, диалог не закрываю", link.id)
+                if state == "chatting":
+                    await self._apply_state(link, "chatting")
                 return
             if incoming and link.closing:
                 return
@@ -189,6 +209,13 @@ class Bridge:
             await self._on_state(link, "chatting")
         elif link.state != phase:
             await self._stop_engine(link)
+
+    async def _apply_state(self, link: AccountLink, state: str | None) -> None:
+        """Переход состояния, если его ещё не обработали отдельным событием state."""
+        if not state or state == link.state:
+            return
+        link.state = state
+        await self._on_state(link, state)
 
     async def _on_state(self, link: AccountLink, state: str | None) -> None:
         if state == "chatting":

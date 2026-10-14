@@ -17,8 +17,11 @@ from app.ui import (
     CHAT_BTN_STOP,
     COMMUNITY_GREETING,
     FOUND_TEXT,
+    NEW_PARTNER_BTN,
     NO_PARTNERS_TEXT,
     PARTNER_LEFT_TEXT,
+    REPORT_BTN,
+    REPORT_SENT_TEXT,
     SEARCHING_TEXT,
     SERVICE_DOWN_TEXT,
     STOPPED_TEXT,
@@ -43,12 +46,21 @@ def parse_payload(raw: Any) -> dict:
 
 
 def _is_start(text: str, payload: dict) -> bool:
-    """Сообщение «Начать», /start или команда start из payload."""
+    """Сообщение «Начать», «Новый собеседник», /start или команда start из payload."""
     lowered = text.strip().lower()
+    if lowered in {"начать", "/start", "start", NEW_PARTNER_BTN.lower()}:
+        return True
     command = lowered.split()[0].split("@", 1)[0] if lowered else ""
     if command in {"начать", "/start", "start"}:
         return True
     return payload.get("command") == "start"
+
+
+def _is_report(text: str, payload: dict) -> bool:
+    """Кнопка «Пожаловаться» или команда report из payload."""
+    if payload.get("command") == "report":
+        return True
+    return text.strip().lower() in {REPORT_BTN.lower(), "пожаловаться"}
 
 
 async def handle_stop(peer: Peer, text: str, active: bool) -> bool:
@@ -83,7 +95,7 @@ async def handle_chat_line(peer: Peer, text: str, chatting: bool) -> bool:
     except NotChattingError:
         delivered = False
     if not delivered:
-        await gateway.send(peer, PARTNER_LEFT_TEXT, "main")
+        await gateway.send(peer, PARTNER_LEFT_TEXT, "partner_left")
     return True
 
 
@@ -112,6 +124,9 @@ async def handle_incoming(peer: Peer, text: str, payload: dict) -> None:
     try:
         if _is_start(text, payload):
             await connect_with_partner(peer)
+            return
+        if _is_report(text, payload):
+            await handle_report(peer)
             return
         await handle_menu_or_dialog(peer, text)
     except ChatApiError as exc:
@@ -275,6 +290,29 @@ async def _leave_queue_later(peer: Peer) -> None:
     finally:
         if _search_timeouts.get(peer) is asyncio.current_task():
             del _search_timeouts[peer]
+
+
+async def handle_report(peer: Peer) -> None:
+    """Жалоба в живом диалоге закрывает его и ищет дальше. После ухода — только подтверждение."""
+    phase = await chat_api.phase(peer)
+    if phase == "searching":
+        await gateway.send(peer, SEARCHING_TEXT, "chat")
+        return
+    if phase != "chatting":
+        await gateway.send(peer, REPORT_SENT_TEXT, "partner_left")
+        return
+    try:
+        phase = await chat_api.report(peer)
+    except NotChattingError:
+        await gateway.send(peer, REPORT_SENT_TEXT, "partner_left")
+        return
+    await gateway.send(peer, REPORT_SENT_TEXT, "chat")
+    cancel_search_timeout(peer)
+    if phase == "chatting":
+        await gateway.send(peer, FOUND_TEXT, "chat")
+        return
+    await gateway.send(peer, SEARCHING_TEXT, "chat")
+    _search_timeouts[peer] = asyncio.create_task(_leave_queue_later(peer))
 
 
 async def connect_with_partner(peer: Peer) -> None:

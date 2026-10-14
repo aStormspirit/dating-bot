@@ -5,13 +5,21 @@ from __future__ import annotations
 from typing import Any
 
 from app.peer import Peer
-from app.ui import build_chat_keyboard, build_idle_keyboard, build_main_keyboard, new_random_id
+from app.ui import (
+    build_chat_keyboard,
+    build_idle_keyboard,
+    build_main_keyboard,
+    build_partner_left_keyboard,
+    new_random_id,
+)
 
 
 def vk_keyboard(kind: str) -> str:
-    """Клавиатура ВК: кнопки диалога, inline «Начать» для бесед или постоянная «Начать» для лички."""
+    """Клавиатура ВК: кнопки диалога, уход собеседника, inline «Начать» или постоянная «Начать»."""
     if kind == "chat":
         return build_chat_keyboard()
+    if kind == "partner_left":
+        return build_partner_left_keyboard()
     if kind == "greeting":
         return build_main_keyboard()
     return build_idle_keyboard()

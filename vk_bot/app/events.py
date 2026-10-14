@@ -42,8 +42,10 @@ async def _deliver(body: dict) -> None:
         delivered = await gateway.send(peer, format_partner(str(body.get("text") or "")), "chat")
     elif kind == "partner_left":
         cancel_search_timeout(peer)
-        text = UNDELIVERED_TEXT if body.get("reason") == "undeliverable" else PARTNER_LEFT_TEXT
-        sent = await gateway.send(peer, text, "main")
+        if body.get("reason") == "undeliverable":
+            sent = await gateway.send(peer, UNDELIVERED_TEXT, "main")
+        else:
+            sent = await gateway.send(peer, PARTNER_LEFT_TEXT, "partner_left")
         print(f"Уход собеседника {peer}: {'доставлено' if sent else 'не доставлено'}", flush=True)
         return
     else:

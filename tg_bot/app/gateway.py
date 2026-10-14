@@ -10,11 +10,11 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 
 from app.peer import Peer
-from app.ui import CHAT_KEYBOARD, IDLE_KEYBOARD
+from app.ui import CHAT_KEYBOARD, IDLE_KEYBOARD, PARTNER_LEFT_KEYBOARD
 
 logger = logging.getLogger(__name__)
 
-Keyboard = Literal["main", "chat"]
+Keyboard = Literal["main", "chat", "partner_left"]
 _MAX_TEXT_LENGTH = 4096
 
 
@@ -32,7 +32,12 @@ class Gateway:
         """
         if self._bot is None:
             raise RuntimeError("Бот Telegram ещё не запущен")
-        markup = CHAT_KEYBOARD if keyboard == "chat" else IDLE_KEYBOARD
+        if keyboard == "chat":
+            markup = CHAT_KEYBOARD
+        elif keyboard == "partner_left":
+            markup = PARTNER_LEFT_KEYBOARD
+        else:
+            markup = IDLE_KEYBOARD
         for attempt in range(2):
             try:
                 await self._bot.send_message(peer.user_id, text[:_MAX_TEXT_LENGTH], reply_markup=markup)
